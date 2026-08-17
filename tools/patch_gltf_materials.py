@@ -27,20 +27,29 @@ What it fixes
    SM_Veh_Sweepo_01 (45 raw, genuinely centimetres) and
    SM_Veh_SpaceStation_01 (89.8 raw, genuinely metres) wrong.
 
-2. Wrong texture atlas on POLYGON_Scifi_Space cooks. ~80% of that pack's
-   glTFs point their single material at PolygonSciFiSpace_Signs_Texture_01_A
-   .png — the 1024x1024 *signage* atlas (black field, white door labels and
-   pictograms) — instead of the 2048x2048 PolygonSciFiSpace_Texture_01_A.png
-   hull/panel atlas the UVs were authored against. Left alone, hulls, crates,
-   debris and ships all import near-black with stray glyphs on them.
-   Measured, not guessed: sampling each mesh's own TEXCOORD_0 against both
-   images, 23/23 fetched space meshes average 92% pure-black samples on the
-   signage atlas and 0% on the hull atlas (SM_Veh_Part_Body_03: 100% vs 0%;
-   SM_Hud_Reticle_01: 100% black on signage, HUD cyan on hull). The remap is
-   therefore unconditional for that pack. Only ..._Signs_Texture_01_A.png is
-   remapped; ..._Signs_Texture_01_B.png (the real sign lettering sheet, used
-   correctly by SM_Sign_*/SM_SignBorder_*) and ..._Texture_03_A.png are
-   untouched.
+2. Wrong texture assignment on the cooked glTFs, fixed from the pack's own
+   MaterialList. Every Synty pack ships MaterialList_<Pack>.txt at its source
+   root: the mesh -> material -> texture mapping exported from the Unity project
+   the UVs were authored in. tools/fetch_material_lists.py pulls it from the
+   server's /raw/ tree (the cooker does not carry it across).
+
+   The cooks disagree with it badly. In POLYGON_Scifi_Space roughly 80% of
+   glTFs name PolygonSciFiSpace_Signs_Texture_01_A.png — a 1024x1024 signage
+   sheet, black field with white door pictograms — for hull geometry whose UVs
+   target the 2048x2048 PolygonSciFiSpace_Texture_01_A.png panel atlas. Left
+   alone, hulls, crates, debris and ships all import near-black with stray
+   glyphs on them.
+
+   An earlier version of this script remapped that atlas unconditionally for the
+   pack. The MaterialList shows why that was wrong: 47 meshes (SM_Sign_* /
+   SM_SignBorder_*) genuinely do use a signage sheet, and the one they use is
+   ..._Signs_Texture_01_B.png — so the cooks have the wrong *variant* even where
+   they have the right family (the pack ships _01_A through _01_F). Driving the
+   assignment from the list is right by construction and needs no per-pack
+   policy: 828 space meshes across 5 distinct textures, 1978 SciFiWorlds meshes
+   across 37, all resolved from data.
+
+   Slots reading "Uses custom shader" or "No Albedo Texture" are left untouched.
 
 3. Out-of-bounds baseColorTexture index -> clamped to the images array length.
    Defensive; Godot falls back to an error material otherwise.
@@ -76,6 +85,7 @@ Deliberately not ported from godot-rts
 import json
 import os
 import pathlib
+import re
 import sys
 
 ROOT = pathlib.Path(__file__).parent.parent / "assets" / "meshes"
@@ -107,12 +117,23 @@ SKELETAL_DIRS = ("Characters", "Unreal_Characters")
 # metre-cook character is ~2.9), so the 0.01 is stray.
 CM_COOK_THRESHOLD = 20.0
 
-# POLYGON_Scifi_Space: signage atlas -> hull/panel atlas. See docstring #2.
-# Only ..._Signs_Texture_01_A.png is remapped. ..._Signs_Texture_01_B.png (used
-# by SM_Sign_* / SM_SignBorder_*) and ..._Texture_03_A.png (used by many
-# SM_Bld_* interior pieces) are correct as cooked and left alone.
-SIGNS_ATLAS = "PolygonSciFiSpace_Signs_Texture_01_A.png"
-MAIN_ATLAS = "PolygonSciFiSpace_Texture_01_A.png"
+# Texture assignment comes from each pack's MaterialList_*.txt (fetched by
+# tools/fetch_material_lists.py), which is the mapping exported from the original
+# Unity project. See docstring #2.
+#
+# Slot values that name no usable albedo texture — leave these materials alone.
+MATLIST_SKIP = {
+    "Uses custom shader",
+    "No Albedo Texture",
+    "None",
+}
+
+# Cache of pack name -> {mesh name: [texture stem per material slot]}.
+_MATLIST_CACHE: dict[str, dict[str, list[str]]] = {}
+_MATLIST_MISSING: set[str] = set()
+
+_MATLIST_MESH = re.compile(r"^Mesh Name:\s*(.+?)\s*$")
+_MATLIST_SLOT = re.compile(r"^Slot:\s*(.+?)\s*\((.+?)\)\s*$")
 
 
 def _pack_of(path: pathlib.Path) -> str:
@@ -170,22 +191,203 @@ def _fix_stray_unit_scale(path: pathlib.Path, g: dict) -> bool:
     return changed
 
 
+def _load_material_list(pack: str) -> dict[str, list[str]]:
+    """Parse a pack's MaterialList into {mesh name: [texture stem per slot]}.
+
+    Slot order in the list is Unity's material-slot order, which is the same
+    order as a glTF mesh's primitives — so slot N belongs to primitive N.
+    """
+    if pack in _MATLIST_CACHE:
+        return _MATLIST_CACHE[pack]
+
+    mapping: dict[str, list[str]] = {}
+    candidates = sorted((ROOT / pack).glob("*/MaterialList*.txt"))
+    if not candidates:
+        if pack not in _MATLIST_MISSING:
+            _MATLIST_MISSING.add(pack)
+            print(
+                f"  ! no MaterialList for {pack} — textures left as cooked."
+                " Run tools/fetch_material_lists.py"
+            )
+        _MATLIST_CACHE[pack] = mapping
+        return mapping
+
+    mesh = None
+    for line in candidates[0].read_text(encoding="utf-8", errors="replace").splitlines():
+        stripped = line.strip()
+        m = _MATLIST_MESH.match(stripped)
+        if m:
+            mesh = m.group(1)
+            mapping.setdefault(mesh, [])
+            continue
+        m = _MATLIST_SLOT.match(stripped)
+        if m and mesh is not None:
+            mapping[mesh].append(m.group(2))
+
+    _MATLIST_CACHE[pack] = mapping
+    return mapping
+
+
+def _mesh_name_candidates(path: pathlib.Path, g: dict) -> dict[int, list[str]]:
+    """Names to try against the MaterialList, per mesh index.
+
+    The cooker runs meshes through Blender, which renames them "Mesh",
+    "Mesh.001" and so on — the original asset name survives only on the node
+    that references the mesh. Single-mesh files fall back to the filename, which
+    is the asset name.
+    """
+    candidates: dict[int, list[str]] = {}
+    for node in g.get("nodes", []):
+        mesh_index = node.get("mesh")
+        name = node.get("name")
+        if mesh_index is None or not name:
+            continue
+        candidates.setdefault(mesh_index, []).append(name)
+    for i in range(len(g.get("meshes", []))):
+        candidates.setdefault(i, []).append(path.stem)
+    return candidates
+
+
+def _texture_uri(path: pathlib.Path, pack: str, stem: str) -> str | None:
+    """Relative URI from a glTF to a texture stem, if the file exists."""
+    tex_dirs = sorted((ROOT / pack).glob("*/Textures"))
+    # A MaterialList names only the texture stem, and packs file textures in
+    # subdirectories (Misc/, Alts/, Emissive/, FX/, Signs/) that the cooker does
+    # not copy to the top level — so search the whole pack, not just Textures/.
+    for tex_dir in tex_dirs:
+        for candidate in sorted(tex_dir.rglob(f"{stem}.png")):
+            return os.path.relpath(candidate, path.parent).replace(os.sep, "/")
+    # Not fetched yet: still emit the conventional path so resolve_assets.py
+    # picks it up on its second pass.
+    if tex_dirs:
+        return os.path.relpath(tex_dirs[0] / f"{stem}.png", path.parent).replace(
+            os.sep, "/"
+        )
+    return None
+
+
+def _image_for_uri(g: dict, uri: str) -> int:
+    """Index of the image with this URI, appending one if absent."""
+    images = g.setdefault("images", [])
+    for i, img in enumerate(images):
+        if img.get("uri") == uri:
+            return i
+    images.append({"uri": uri})
+    return len(images) - 1
+
+
+def _texture_for_image(g: dict, image_index: int) -> int:
+    """Index of a texture pointing at this image, appending one if absent."""
+    textures = g.setdefault("textures", [])
+    for i, tex in enumerate(textures):
+        if tex.get("source") == image_index:
+            return i
+    entry: dict = {"source": image_index}
+    # Reuse an existing sampler so filtering/wrapping stays consistent.
+    for tex in textures:
+        if "sampler" in tex:
+            entry["sampler"] = tex["sampler"]
+            break
+    textures.append(entry)
+    return len(textures) - 1
+
+
 def _fix_atlas(path: pathlib.Path, g: dict) -> bool:
-    """Repoint POLYGON_Scifi_Space cooks off the signage atlas (docstring #2)."""
-    if _pack_of(path) != "POLYGON_Scifi_Space_SourceFiles_v2":
+    """Point every material at the texture its MaterialList entry names.
+
+    The cooked glTFs are unreliable here: in POLYGON_Scifi_Space roughly 80% of
+    them name a signage atlas for hull geometry, and even the genuine sign props
+    get the wrong colour variant (..._01_A instead of the ..._01_B the list
+    specifies). Rather than guess with a per-pack rule, take the mapping from the
+    pack's own MaterialList — it is exported from the project the UVs were
+    authored in, so it is right by construction and needs no per-pack policy.
+    """
+    pack = _pack_of(path)
+    mapping = _load_material_list(pack)
+    if not mapping:
         return False
+
+    names = _mesh_name_candidates(path, g)
     changed = False
-    for img in g.get("images", []):
-        uri = img.get("uri", "")
-        if uri.endswith(SIGNS_ATLAS):
-            img["uri"] = uri[: -len(SIGNS_ATLAS)] + MAIN_ATLAS
-            changed = True
+    for mesh_index, mesh in enumerate(g.get("meshes", [])):
+        slots = None
+        for candidate in names.get(mesh_index, []):
+            slots = mapping.get(candidate)
+            if slots:
+                break
+        if not slots:
+            continue
+        for slot_index, prim in enumerate(mesh.get("primitives", [])):
+            if slot_index >= len(slots):
+                break
+            stem = slots[slot_index]
+            if stem in MATLIST_SKIP:
+                continue
+            mat_index = prim.get("material")
+            if mat_index is None or mat_index >= len(g.get("materials", [])):
+                continue
+            uri = _texture_uri(path, pack, stem)
+            if uri is None:
+                continue
+
+            pbr = g["materials"][mat_index].setdefault("pbrMetallicRoughness", {})
+            bct = pbr.get("baseColorTexture")
+            tex_index = _texture_for_image(g, _image_for_uri(g, uri))
+            if bct is None:
+                pbr["baseColorTexture"] = {"index": tex_index}
+                changed = True
+            elif bct.get("index") != tex_index:
+                bct["index"] = tex_index
+                changed = True
+
+    if changed:
+        _drop_orphan_images(g)
     return changed
+
+
+def _drop_orphan_images(g: dict) -> None:
+    """Remove images/textures nothing references any more, reindexing what is
+    left. Keeps the cooks from accumulating dead atlas references each run,
+    which would make the patcher non-idempotent."""
+    used_tex = set()
+    for mat in g.get("materials", []):
+        for block in (mat, mat.get("pbrMetallicRoughness", {})):
+            for key in ("baseColorTexture", "emissiveTexture", "normalTexture",
+                        "occlusionTexture", "metallicRoughnessTexture"):
+                ref = block.get(key) if isinstance(block, dict) else None
+                if isinstance(ref, dict) and "index" in ref:
+                    used_tex.add(ref["index"])
+
+    textures = g.get("textures", [])
+    keep_tex = [i for i in range(len(textures)) if i in used_tex]
+    if len(keep_tex) == len(textures):
+        return
+    tex_remap = {old: new for new, old in enumerate(keep_tex)}
+    g["textures"] = [textures[i] for i in keep_tex]
+
+    used_img = {textures[i].get("source") for i in keep_tex}
+    images = g.get("images", [])
+    keep_img = [i for i in range(len(images)) if i in used_img]
+    img_remap = {old: new for new, old in enumerate(keep_img)}
+    g["images"] = [images[i] for i in keep_img]
+    for tex in g["textures"]:
+        if "source" in tex and tex["source"] in img_remap:
+            tex["source"] = img_remap[tex["source"]]
+
+    for mat in g.get("materials", []):
+        for block in (mat, mat.get("pbrMetallicRoughness", {})):
+            if not isinstance(block, dict):
+                continue
+            for key in ("baseColorTexture", "emissiveTexture", "normalTexture",
+                        "occlusionTexture", "metallicRoughnessTexture"):
+                ref = block.get(key)
+                if isinstance(ref, dict) and ref.get("index") in tex_remap:
+                    ref["index"] = tex_remap[ref["index"]]
 
 
 def _fix_materials(g: dict) -> bool:
     """docstrings #3, #4, #5."""
-    max_idx = max(len(g.get("images", [])) - 1, 0)
+    max_idx = max(len(g.get("textures", [])) - 1, 0)
     changed = False
     for mat in g.get("materials", []):
         pbr = mat.get("pbrMetallicRoughness", {})

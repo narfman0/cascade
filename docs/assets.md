@@ -135,32 +135,57 @@ Verified pair for the `SK_` rule: `SM_Veh_Barge_01` has a raw extent of 1822
 units (centimetres) while its skeletal twin `SK_Veh_Barge_01` maxes at 10.08
 (metres).
 
-### `POLYGON_Scifi_Space` points ~80% of its cooks at the wrong texture atlas
+### Texture assignment comes from the pack's MaterialList, not the cook
 
-That pack has two 01_A atlases:
+**Every Synty pack ships `MaterialList_<Pack>.txt` at its source root.** It is
+the mesh → material → texture mapping exported from the Unity project the UVs
+were authored in — the authoritative answer to "which atlas does this mesh use":
 
-- `PolygonSciFiSpace_Texture_01_A.png` — 2048², the real hull/panel/greeble
-  sheet (blue-grey plating, hex mesh, tread plate, colour ramps).
-- `PolygonSciFiSpace_Signs_Texture_01_A.png` — 1024², a **signage** sheet:
-  black field with white door labels ("ENGINE ROOM") and pictograms.
+```
+Prefab Name: SM_Veh_Part_Body_03
+    Mesh Name: SM_Veh_Part_Body_03
+        Slot: PolygonScifiSpace_Material_01_A (PolygonSciFiSpace_Texture_01_A)
+```
 
-48 of 60 randomly sampled cooks name the signage sheet. Sampling each mesh's
-own `TEXCOORD_0` against both images, 23/23 fetched space meshes average **92%
-pure-black samples on the signage atlas and 0% on the hull atlas** (e.g.
-`SM_Veh_Part_Body_03` 100% vs 0%; `SM_Hud_Reticle_01` 100% black on signage but
-HUD cyan on the hull sheet). So the remap is unconditional for that pack. Left
-unpatched, every hull, crate, satellite and station imports near-black with
-stray glyphs on it.
+It exists only in the server's **raw** tree (the cooker converts meshes and
+copies textures but does not carry documentation across), so
+`tools/fetch_material_lists.py` pulls it from `/raw/<pack>/<SourceFiles>/`.
+`fetch_assets.sh` runs it automatically before the patcher.
 
-Not remapped, because they are correct as cooked:
-`PolygonSciFiSpace_Signs_Texture_01_B.png` (the real sign lettering sheet, used
-by `SM_Sign_*` / `SM_SignBorder_*`) and `PolygonSciFiSpace_Texture_03_A.png`
-(used by many `SM_Bld_*` interior pieces).
+**Why this matters: the cooks are unreliable and inconsistent.** Sampled fresh
+from the server with no patching:
 
-The `Characters/Unreal_Characters/` copies of each character are the same
-skeletal mesh cooked against the signage atlas; the plain `Characters/` copies
-use the hull atlas and additionally carry an animation. Use `Characters/`;
-`fetch_assets.sh` skips `Unreal_Characters/` in `--pack` mode.
+| Mesh | Cook references | MaterialList says |
+|---|---|---|
+| `SM_Veh_Part_Engine_01` | `Signs_Texture_01_A.png` | `Texture_01_A` |
+| `SM_Bld_Wall_01` | `Texture_03_A.png` | `Texture_01_A` |
+| `SM_Prop_Crate_01` | `Texture_01_A.png` | `Texture_01_A` (correct) |
+| `SM_SignBorder_Nuclear_01` | `Signs_Texture_01_B.png` | `Signs_Texture_01_B` (correct) |
+
+`Signs_Texture_01_A` is a 1024² signage sheet — black field, white door
+pictograms — so hull geometry pointed at it imports near-black with stray glyphs.
+Roughly 80% of the pack's meshes were affected in the original survey's sample.
+
+**An earlier version of the patcher remapped that atlas unconditionally for the
+pack, and that was wrong.** The MaterialList shows 47 meshes (`SM_Sign_*`,
+`SM_SignBorder_*`) genuinely do use a signage sheet — and the one they use is
+`Signs_Texture_01_B`, so the cooks have the wrong *variant* even where they have
+the right family (the pack ships `_01_A` through `_01_F`). A blanket rule
+destroys those props. Driving assignment from the list is right by construction
+and needs no per-pack policy: 828 space meshes across 5 distinct textures, 1978
+`SciFiWorlds` meshes across 37, all resolved from data.
+
+Two gotchas the implementation handles, worth knowing if you touch it:
+
+- **Mesh names in the cooks are Blender's**, not the asset's — `Mesh`,
+  `Mesh.001`. The original name survives only on the *node* referencing the mesh,
+  so lookups resolve from node names, falling back to the filename.
+- Slots reading `Uses custom shader` or `No Albedo Texture` are left untouched.
+
+A systemic fix belongs in the cooker rather than in every consumer — filed as a
+deferred task in `workspace/asset-server/TODO.md`, with this implementation
+named as the reference. Until that lands, every project consuming these packs
+needs its own copy of this repair.
 
 ### Material fixes (defensive, all cheap)
 
@@ -363,9 +388,35 @@ of these belong in Cascade.
 
 ---
 
-## 5. Art-style warning: POLYGON vs SIMPLE
+## 5. Art family: POLYGON (decided)
 
-The manifest mixes two Synty families and they do not match:
+**Decision (project owner, 2026-08-17): use POLYGON.** `POLYGON_Scifi_Space` is
+the primary pack; `POLYGON_SciFiWorlds` is the secondary for scrap, barges and
+industrial props. Do not mix SIMPLE assets into scenes.
+
+Consequences worth knowing:
+
+- The SIMPLE packs are where the recognisable real-world vocabulary lives
+  (actual satellites, the Shuttle, the ISS, a matched planet set). Giving that
+  up means Cascade's debris reads as generic sci-fi hardware rather than
+  identifiable hardware. If a specific contract ever needs a recognisable
+  object, treat it as a modelling task, not a pack swap.
+- Planets stay **procedural** (`CelestialBody` builds its own sphere), which
+  sidesteps the question entirely for the largest objects on screen. SIMPLE's
+  Earth mesh is not used.
+- The sky is a procedural shader — there is no orbital sky on the server at all
+  (see below).
+
+The original survey's reasoning is kept below, since it explains what the
+decision costs.
+
+### Background: the two families do not match
+
+- **POLYGON** (`POLYGON_Scifi_Space`, `POLYGON_SciFiWorlds`) — dense texture
+  atlases, panel-line detail, saturated blue/white or yellow/rust palettes,
+  hundreds to low thousands of triangles per prop.
+- **SIMPLE** (`SIMPLE_Space*`) — flat vertex-coloured look off a tiny 20 KB
+  atlas, very few triangles, no panel detail.
 
 - **POLYGON** (`POLYGON_Scifi_Space`, `POLYGON_SciFiWorlds`) — dense texture
   atlases, panel-line detail, saturated blue/white or yellow/rust palettes,

@@ -35,12 +35,13 @@ DEST="assets/meshes"
 # Deliberately absent: `_skies` and SIMPLE_Sky. Both are terrestrial daylight
 # panoramas (blue sky over a brown ground plane) — there is no starfield on the
 # server. Build the orbital sky in-engine. See docs/assets.md §4.4.
+# POLYGON only — the art family is decided (docs/assets.md section 5). The
+# SIMPLE_Space* packs are deliberately absent: their flat, near-untextured look
+# does not sit in the same shot as POLYGON's panel detail.
 DEFAULT_PACKS=(
 	POLYGON_Scifi_Space
 	POLYGON_SciFiWorlds
-	SIMPLE_Space_Source_Files
-	SIMPLE_Space_Interiors
-	SIMPLE_Space_Characters
+	POLYGON_SciFi_Outpost_Map
 	POLYGON_Particle_FX
 )
 
@@ -75,7 +76,9 @@ for p in d['cooked']['packs']:
 			echo "  fetched ${path#assets/}"
 		done
 	done
+	python3 tools/fetch_material_lists.py || true
 	python3 tools/patch_gltf_materials.py || true
+	python3 tools/fetch_missing_textures.py || true
 	echo "Done. Run: godot --headless --import"
 	exit 0
 fi
@@ -87,6 +90,13 @@ fi
 # reference to a texture that was not in the first closure.
 export ASSET_SERVER="$SERVER" DEST="$DEST"
 python3 tools/resolve_assets.py
+# Texture assignment is taken from each pack's MaterialList (see docs/assets.md
+# section 3), so it has to be on disk before the patcher runs.
+python3 tools/fetch_material_lists.py
 python3 tools/patch_gltf_materials.py
+# The patcher can name a texture the original cook never referenced, so it was
+# never in the closure. resolve_assets covers referenced assets; this covers
+# whole-pack browsing sets too.
 python3 tools/resolve_assets.py
+python3 tools/fetch_missing_textures.py
 echo "Done. Run: godot --headless --import"
