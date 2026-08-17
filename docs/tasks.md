@@ -176,6 +176,15 @@ proxy clamp. Owner-directed track; independent of the M3 gate.
 Open questions for owner (full context in the design doc): green-light the
 real-Earth map drop; site list beyond NYC; whether relief ever needs collision.
 
+## Track SD — Stations and Docking (designed, not started)
+
+Design: architecture.md "Stations and Docking". Owner-directed. Depends on
+nothing in Track PR; shares the destination-interface refactor with it.
+
+- [ ] **SD1 — Stations on rails**: `StationDef`, orbit math extracted to a shared helper, `OrbitalStation` scene from POLYGON station modules, destination interface for Autopilot/NavConsole (stations listed with live ETAs), station influence in `reference_body()`.
+- [ ] **SD2 — Docking**: `DockingPort` (volume + axis), soft-capture rules (closing speed, alignment), docked state (freeze + parent to port, controls stand down, `interact` context), undock push-off, HUD approach readout (closing speed, axis error). Headless test: scripted approach docks; misaligned or hot approach refuses; undock restores exact free flight.
+- [ ] **SD3 (stretch)**: assisted approach via ManeuverMinigame; ship-to-ship ports.
+
 ## Milestone 3 — Debris capture + contracts (DO NOT START)
 
 Gated on M1 + M2 verification and owner sign-off on movement feel. Not yet broken down. Headline scope from plan.md Phase 2/3: physics-active debris, Grapple Arm `Tool` Resource + RotationMatch minigame, tether joint, CargoBay stow, first contract via `ContractManager`.

@@ -20,11 +20,11 @@ milestone breakdown is at the bottom and mirrored in docs/tasks.md.
 
 ## Non-goals (for now)
 
-- **Landing.** Cascade is an orbital game. The renderer must hold up from
-  standoff distance (2.5 radii) down to spawn altitude (2× radius over Earth,
-  i.e. ~2 km above the surface), not from a walking camera. If landing ever
-  becomes gameplay, that is a new milestone on top of this design, not a rewrite
-  — the quadtree just keeps subdividing.
+- **Landing.** Ruled out for now (owner: gravity handling is the blocker, not
+  interest). **Low skimming is in scope** — flying close over terrain — which
+  promotes relief from visual-only to collidable near the surface; see "Skimming
+  and collision" below. The renderer must hold up from standoff distance down to
+  a skimming pass, not from a walking camera.
 - **Atmospheric scattering / clouds.** A cheap rim-glow shell is listed as a
   stretch item; real scattering is out of scope.
 - **Real-time terrain deformation.** Heightmaps are static.
@@ -94,10 +94,19 @@ mesh:       root patches only,      quadtree to depth ~3,   quadtree to depth 6�
 - Cracks: neighbouring patches at different depths are stitched with **skirts**
   (a ring of vertices dropped ~2% of patch size below the surface). Skirts are
   the boring, robust answer; geomorphing is a stretch goal, not a requirement.
-- Collision: unchanged — the analytic sphere collider from `celestial_body.gd`
-  remains the physics truth. Terrain relief is visual (±2% of radius; the
-  gameplay never grazes the surface closer than the collider's margin of error
-  at the standoffs involved). Revisit only if landing becomes a goal.
+- Collision — **skimming is supported** (owner decision, 2026-08-17). Far away,
+  the analytic sphere collider from `celestial_body.gd` remains the physics
+  truth. Within skim range (ship's true distance to surface < ~500 m) the
+  renderer swaps collision sources: the sphere collider is disabled and the
+  resident patches under and around the ship get trimesh
+  (`ConcavePolygonShape3D`) colliders built from their render mesh on the same
+  worker tasks. The swap matters in both directions: keeping the sphere enabled
+  would wall the ship out of valleys (terrain dips below nominal radius), and
+  without patch colliders the peaks above it would be intangible. Ship CCD is
+  enabled inside skim range — 60 Hz physics and a fast pass over 25 m patches
+  will tunnel otherwise. No gravity: skimming is powered flight over terrain,
+  not a descent; gravity wells for the player stay out of scope until landing
+  does (owner: landing is blocked on exactly that).
 
 ### Height sources: rough everywhere, authored where it matters
 
@@ -238,6 +247,9 @@ depth caps.
   Every body immediately stops being a smooth ball. No quadtree yet.
 - **PR2 — Progressive refinement.** Quadtree + screen-error metric + skirts +
   threaded generation + cache + `planet_test.gd`. Approach becomes continuous.
+  Includes **skim collision**: trimesh colliders on near patches, the
+  sphere-collider swap, and ship CCD in skim range — with a test that flies a
+  scripted low pass and asserts no tunnelling and no invisible-sphere blocking.
 - **PR3 — Detail sites + NYC pilot.** `DetailSite` streaming, inset blending,
   authored Earth/Moon/Mars maps cooked onto the asset server, Manhattan diorama
   from POLYGON city packs, night-emissive street grid, screenshots.
@@ -256,6 +268,6 @@ depends on both. Each PR is independently shippable and screenshot-reviewable.
 2. **Site list beyond NYC:** natural candidates given the tone — Cape Canaveral,
    Baikonur, Shanghai lights, Tycho crater base (Moon), Olympus Mons survey
    station (Mars). Which matter enough to author?
-3. **Does relief ever need to be *felt*** (collision), or is visual-only
-   permanently acceptable? Current answer: visual-only; changes only if landing
-   or very-low skimming becomes gameplay.
+3. ~~Does relief ever need to be felt (collision)?~~ **Answered: yes — low
+   skimming is wanted** (no landing yet; gravity is the blocker there). Folded
+   into PR2 as the skim-collision item above.

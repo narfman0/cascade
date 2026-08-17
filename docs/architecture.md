@@ -229,6 +229,51 @@ Flight assist with a destination. The player opens the nav console, picks a body
 - **The cruise drive is not the manual main engine.** 20 m/s² would make precision debris work unflyable by hand, so the computer gets a high-impulse drive it alone throttles and the pilot keeps the 4 m/s² main.
 - **Any stick input cancels it.** Discoverable, and it means a player never hunts for a disengage key.
 
+## Stations and Docking (designed, not built — owner-directed 2026-08-17)
+
+Dockable orbital stations, and eventually other ships. Design constraints and
+decisions, recorded before implementation:
+
+**Stations ride the same analytic rails as moons.** An `OrbitalStation` is a
+scene (POLYGON station modules — see docs/assets.md §4.5) attached to a
+`StationDef` carrying the same orbital elements as `BodyDef` (parent body,
+orbit radius/period/phase/inclination). Position and velocity are closed-form
+functions of `SimClock.sim_time`, so stations work under time compression and
+the autopilot can intercept them exactly like a moon. The orbit math moves from
+`CelestialBody` into a shared helper both classes call.
+
+**Autopilot destinations become an interface.** `Autopilot` and `NavConsole`
+currently take `CelestialBody`. Both generalize to any object exposing
+`position_at(t)`, `velocity_at(t)`, `arrival_standoff()`, and a display name —
+which is exactly the set the transfer math already uses. Stations then appear in
+the nav console with live ETAs for free, standoff ~200 m.
+
+**Reference frames include stations.** A station gets a small influence radius
+(~2 km); `reference_body()` resolves it as deeper than its parent planet, so
+flight assist holds station relative to the station while you approach — the
+docking prerequisite, and it falls out of the existing deepest-wins rule.
+
+**Docking is a state, not a joint.** Soft-capture conditions: within the dock
+volume of a `DockingPort` (Area3D on the station, axis marker for alignment),
+relative velocity under ~1.5 m/s, approach axis within ~20° of the port axis.
+On capture the ship is frozen kinematic and parented to the port (ships are
+RigidBody3D but the *station* is on rails, not a physics body — so this is
+node-under-Node3D parenting, and the never-nest-RigidBody rule below is not
+violated; if ship-to-ship docking lands later, the docked ship freezes and the
+host stays live, same pattern as the stowed EVA suit). Undock reverses it with
+a small push-off impulse. Docked is an input-mode-adjacent state: flight
+controls stand down, `interact` context becomes the station (contract board,
+repairs — Phase 4/5 content hangs here).
+
+**Manual first, assisted second.** Docking is flown by hand with flight assist
+in station frame — that is the skill loop, and the tone. The guided-burn
+`ManeuverMinigame` (see "Flight Assist Maneuver System" above) can be layered on
+later as the "computer-assisted approach" option; it is not a prerequisite.
+
+**Other ships** (NPC vessels as dock targets) are explicitly stretch: same
+`DockingPort` component, but they need the ship-to-ship freeze pattern plus NPC
+traffic to exist at all. Design accommodates; nothing is built for it yet.
+
 ### Constraint: never nest a RigidBody3D under another RigidBody3D
 
 Godot does not support it. Both bodies live independently in the physics space, so the server keeps writing the child's global transform while the node tree re-derives its local transform from the moving parent. The two fight, the child's local position diverges without bound, and it drags the parent's reported transform with it.
