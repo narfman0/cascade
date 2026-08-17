@@ -217,10 +217,32 @@ budgets and verification plan live there; this is the build order.
   corners collapsing onto 8 cube corners, each shared by 3 faces) instead of
   guessing which patches border each other.
 
-**Still open before the PR1/PR2 gates close:**
-- [ ] Screenshot sets for both gates (Earth disc with continents/sea, terminator
-  night lights, Moon relief, Jupiter banding; 5-frame continuous approach with no
-  pop; low-skim frame). Harness work only — the systems are verified.
+**Still open before the PR1/PR2 gates close — the VISUAL gate is FAILING:**
+
+`tests/capture_planet_shots.gd` runs and writes all 11 shots, but the output is
+wrong and the gate does not pass. Do not treat PR1/PR2 as done. Two distinct
+problems, and they need separating before anything else in Track PR:
+
+- [ ] **Surfaces render as flat grey facets, not textured planets.** Grey at
+  roughly 0.5 is the shader's `base_color` fallback, which points at the baked
+  albedo/normal/emissive not reaching the material at draw time — even though
+  `textures_ready` reports true and `_commit_bake` does call
+  `set_shader_parameter("textures_ok", true)`. The `planet_sun_direction` global
+  uniform *is* registered in project.godot, so that is not it. Check next: is
+  `_material` actually the patches' material (override vs surface_material), and
+  are patches built before the bake commit picking it up?
+- [ ] **The harness frames the wrong thing.** The review camera is set `current`,
+  but the shots look like geometry at close range from an unintended position, and
+  the harness reports `max_depth: 0` / `skim=false` even when posed 140 m above
+  the surface — so `_evaluate()` is reading a different camera than the one being
+  framed (the ship's rig camera, which lags a teleport by design). Refinement
+  itself is fine — planet_test measures depth 5 correctly — this is the harness.
+- [ ] Once both are fixed: Earth disc with continents/sea, terminator night
+  lights, Moon relief, Jupiter banding, 5-frame no-pop approach, low-skim frame.
+
+The 31 analytic checks in `tests/planet_test.gd` all pass and cover geometry,
+determinism, seams, spin, budgets and the collision swap — so the *systems* are
+sound. What is unverified is that any of it looks like a planet.
 ### PR3 — Detail sites + NYC pilot (scope set by owner 2026-08-17)
 
 Owner direction: seed from NASA / open GIS data at **coarse granularity**, add
