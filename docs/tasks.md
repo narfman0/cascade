@@ -141,13 +141,24 @@ Same physics standard as M1: the suit is a small Newtonian body, not a character
 - [ ] Feel pass: EVA should feel deliberate and slightly fragile vs the ship — lower acceleration, faster FA convergence (suit computer is nimble), audible-in-future thruster puffs (leave `AudioManager` hook comments, no audio assets yet).
 
 ### M2 VERIFICATION GATE — must pass before any M3 (debris/tools/contracts) work
-- [ ] Exit ship while ship drifts at 5 m/s: character exits co-moving (no relative velocity jump), ship coasts on unchanged.
-- [ ] Exit ship while ship is slowly rotating: character inherits correct tangential velocity (visibly drifts away along the tangent).
-- [ ] Fly 100+ m from ship, FA off, null velocity manually, return, re-enter via CargoBay. Prompt/state transitions clean both ways; no physics pops on re-parent.
-- [ ] Fuel drains believably during a round trip; 20% and 5% warnings fire once each, at the right thresholds; refill on entry works.
-- [ ] Momentum conservation holds for character (same coast test as M1).
-- [ ] Camera/control handoff ship↔EVA is seamless — no frame of wrong camera, no stuck mouse.
-- [ ] Record clip/screenshots for owner review.
+
+Automated in `tests/eva_test.gd` (26 checks, all green — run
+`godot --headless res://tests/eva_test.tscn`):
+
+- [x] Exit ship while ship drifts at 5 m/s: character exits co-moving (0.058 m/s relative), ship coasts on unchanged (4.97 m/s).
+- [x] Exit ship while ship is rotating: character inherits the tangential velocity of the hatch (1.36 m/s expected, 0.058 error). Note the test spins about an axis perpendicular to the hatch offset — with a fixed world axis the cross product can collapse and the check passes whether or not the ω × r term exists.
+- [x] Fuel: 20% and 5% warnings fire exactly once each, at 20.1% and 5.1%; refill tops up and rearms them.
+- [x] Momentum conservation holds for the suit (zero drift over 120 ticks, linear and angular).
+- [x] Camera handoff ship↔EVA: correct camera current in each mode, EVA camera in the tree, ship camera restored on boarding.
+- [x] Boarding: cargo-bay overlap detected, suit stowed out of the tree, input mode restored, no impulse imparted to the hull.
+- [x] Suit is stowed (out of tree, frozen, collision disabled) while aboard — guards the nested-RigidBody3D regression.
+
+Still needs a human at a keyboard — no assertion captures these:
+
+- [ ] Fly 100+ m from the ship under thrust, FA off, null velocity manually, return and re-enter. The automated check holds the suit in the bay rather than flying it in.
+- [ ] FA-off is challenging but controllable; FA-on EVA feels deliberate and slightly fragile next to the ship.
+- [ ] Camera/control handoff *feels* seamless; no stuck mouse.
+- [ ] Screenshots: the harness (`tests/capture_eva_shots.gd`) produces correct HUD and state but does not yet frame the astronaut legibly — see note below.
 
 ---
 

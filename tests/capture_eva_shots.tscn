@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://bevashots0001"]
+
+[ext_resource type="Script" path="res://tests/capture_eva_shots.gd" id="1_e"]
+
+[node name="CaptureEvaShots" type="Node"]
+script = ExtResource("1_e")

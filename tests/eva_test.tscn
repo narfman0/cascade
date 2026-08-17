@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://bevatest0001"]
+
+[ext_resource type="Script" path="res://tests/eva_test.gd" id="1_eva"]
+
+[node name="EvaTest" type="Node"]
+script = ExtResource("1_eva")
