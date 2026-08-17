@@ -28,6 +28,9 @@ milestone breakdown is at the bottom and mirrored in docs/tasks.md.
 - **Atmospheric scattering / clouds.** A cheap rim-glow shell is listed as a
   stretch item; real scattering is out of scope.
 - **Real-time terrain deformation.** Heightmaps are static.
+- **Streamed or high-fidelity terrain data.** Explicitly deferred by the owner.
+  Global maps are coarse (2k) and committed; the layered height lookup leaves
+  room for a streaming tier later, but it is not built and not designed in detail.
 
 ## The scale problem, addressed head-on
 
@@ -118,16 +121,38 @@ Layered, in order of precedence at any surface point:
    sea level (bodies with a sea render a flat shell + distinct albedo below it),
    amplitude. Gas giants set amplitude 0 and get banded albedo instead — the
    pipeline treats "smooth with fancy albedo" as just another parameterization.
-2. **Authored global map — the bodies we care about.** An equirectangular
-   16-bit height PNG + albedo PNG per body, sampled instead of (not blended
-   with) the procedural base where present. Earth, Moon and Mars have excellent
-   public-domain sources (NASA Blue Marble / SRTM30+, LRO LOLA, MOLA) that
-   downsample beautifully to the 2–4k textures we need. **These belong on the
-   asset server** as a `CASCADE_Planets` raw drop — noted as a task; procedural
-   stands in until then. Without real data Earth still gets continents and a
-   sea, just not *our* continents — and NYC's "recognizable coastline" premise
-   really wants the real map, so this task is on the critical path for the NYC
-   pilot, not optional polish.
+2. **Authored global map — coarse, committed, no streaming.** (Owner decision,
+   2026-08-17: seed from NASA / open GIS data at coarse granularity; higher
+   fidelity and streaming are explicitly deferred — "later we can investigate
+   streaming and higher fidelity options if we even want it.")
+
+   One equirectangular height map + albedo map per body, sampled instead of (not
+   blended with) the procedural base where present. Public-domain / open sources:
+
+   | Body | Height | Albedo |
+   |---|---|---|
+   | Earth | GEBCO or ETOPO1 (topography + bathymetry, so the sea floor is real too) | NASA Blue Marble |
+   | Moon | LRO LOLA | LROC WAC mosaic |
+   | Mars | MGS MOLA | Viking / MDIM colour mosaic |
+
+   **Coarse means 2048×1024, and that is a deliberate ceiling, not a placeholder.**
+   At Earth's compressed radius of 2,000 m one texel spans ~6 m of surface —
+   already finer than the depth-7 vertex spacing of 0.77 m can be *fed* from a
+   global map, and far finer than anything reads from orbit. A 4k map would cost
+   4× the memory to describe detail the geometry cannot express.
+
+   **Committed to the repo under `assets/planets/`, not fetched.** Three 2k PNG
+   pairs are a few MB total, they never change, and committing them removes the
+   asset-server write dependency and the whole fetch/cook path for this data.
+   The server remains the right home for *mesh* packs; a handful of static
+   scientific rasters is not the same problem. (This supersedes the earlier
+   `CASCADE_Planets` raw-drop plan.)
+
+   **Deferred, on the owner's call:** tiled/streamed height data, per-region
+   high-resolution insets beyond the authored detail sites, and any runtime
+   fetch. Nothing in this design forecloses them — the height source is already
+   a layered lookup, so a streaming tier would slot in as a fourth layer above
+   the site insets — but none of that machinery gets built now.
 3. **Site insets — small and sharp.** Each detail site may carry a small
    high-resolution height inset (e.g. 512², covering its footprint) blended
    into patches over the site radius with a smoothstep falloff, so Manhattan

@@ -221,12 +221,20 @@ budgets and verification plan live there; this is the build order.
 - [ ] Screenshot sets for both gates (Earth disc with continents/sea, terminator
   night lights, Moon relief, Jupiter banding; 5-frame continuous approach with no
   pop; low-skim frame). Harness work only — the systems are verified.
-### PR3 — Detail sites + NYC pilot
-- [ ] `scripts/world/detail_site.gd` per the design doc schema (`lat_deg/lon_deg/footprint_m/height_inset/scene/night_emissive/nav_note`).
-- [ ] Site streamer in `PlanetSurface`: in at 3 km, out at 4 km (hysteresis); scene oriented to the sphere tangent at (lat,lon), rotating with spin; inset height blended into overlapping patches with smoothstep falloff over the footprint.
-- [ ] Authored maps: Earth/Moon/Mars height+albedo (public domain: NASA Blue Marble, LRO LOLA, MOLA), 2–4k equirect PNG. Preferred home: asset-server raw drop `CASCADE_Planets` (needs owner/server write access); fallback if the server is not writable from the dev box: commit under `assets/planets/` (a few MB, un-ignored) and note the migration. Do not block the milestone on server access.
-- [ ] NYC pilot `scenes/sites/nyc.tscn`: add `POLYGON_SciFi_City` + `POLYGON_City` to `DEFAULT_PACKS` (now, not before), Manhattan grid from `SM_Bld_Background_*` at miniature scale (towers 25–40 m), rivers/harbor from the height inset, emissive street-grid night texture. Placed at 40.7 N, −74.0 E on the REAL Earth map — the recognizable-coastline premise needs the authored map, so that item precedes this one.
-- [ ] **PR3 gate**: all suites green + site stream-in/out test; the money shot — NYC at night from 2 km, terminator in frame. Owner review.
+### PR3 — Detail sites + NYC pilot (scope set by owner 2026-08-17)
+
+Owner direction: seed from NASA / open GIS data at **coarse granularity**, add
+**NYC detail**, and **defer streaming and higher fidelity** ("later we can
+investigate ... if we even want it"). That makes this milestone smaller than
+originally designed — no fetch pipeline, no tiling, no server drop.
+
+- [ ] **Coarse global maps, committed.** 2048×1024 equirect height + albedo for Earth, Moon, Mars into `assets/planets/` (Earth: GEBCO/ETOPO1 + Blue Marble; Moon: LOLA + LROC WAC; Mars: MOLA + Viking mosaic). Un-ignore that path in `.gitignore` — these are static scientific rasters, a few MB, and committing them removes the asset-server write dependency entirely. **2k is a ceiling, not a placeholder**: at Earth's 2,000 m compressed radius one texel is ~6 m, already finer than a global map can usefully feed depth-7 geometry.
+- [ ] **Wire the authored path in `BodySurface`.** `authored_height`/`authored_albedo` already exist as fields; sample them *instead of* the noise when set (equirect lookup from the patch's sphere direction), with the procedural base as the automatic fallback so a missing map degrades to today's behaviour rather than breaking.
+- [ ] **Sea level from real bathymetry.** With ETOPO/GEBCO the ocean floor is real data, so Earth's `sea_level` becomes a lookup threshold rather than a tuned constant — check the coastline lands where it should before moving on. This is the gate on NYC being recognizable.
+- [ ] `scripts/world/detail_site.gd` per the design-doc schema (`lat_deg/lon_deg/footprint_m/height_inset/scene/night_emissive/nav_note`).
+- [ ] Site streamer in `PlanetSurface`: in at 3 km, out at 4 km (hysteresis); scene oriented to the sphere tangent at (lat,lon) and rotating with spin; inset height blended into overlapping patches with a smoothstep falloff over the footprint. NOTE: anything with a physics body parented under the rail-driven surface hits the frozen-kinematic write-back problem — see the docking note in architecture.md.
+- [ ] NYC pilot `scenes/sites/nyc.tscn` at 40.7 N, −74.0 W: add `POLYGON_SciFi_City` + `POLYGON_City` to `DEFAULT_PACKS` (now, not before), Manhattan grid from `SM_Bld_Background_*` at miniature scale (towers 25–40 m), harbour/rivers from the height inset, emissive street-grid night texture.
+- [ ] **PR3 gate**: all six suites green + a site stream-in/out test (in at 3 km, out at 4 km, no thrash at the boundary, correct tangent orientation as the planet spins); the money shot — NYC at night from 2 km with the terminator in frame. Owner review.
 
 ### PR4 (stretch — owner call): atmosphere rim shell, clouds, geomorphing, more sites (Canaveral, Baikonur, Shanghai, Tycho, Olympus Mons).
 
