@@ -103,6 +103,23 @@ Approach burns, docking, and orbital insertion are guided maneuvers — the ship
 - On return: Character must be within CargoBay Area3D. Enter ship action re-parents Character to Ship.
 - Low fuel warning at 20%; auto-return prompt at 5%.
 
+## Input Modes and Interaction
+
+Controls stay simple by using **modes, not more keys**. Exactly one input mode is active at a time, held in `GameState.input_mode`; each controller (ship, EVA, interior, minigame) processes input only when its mode is active.
+
+| Mode | Movement keys mean | Entered via |
+|---|---|---|
+| `SHIP_FLIGHT` | 6DOF thrust (WASDQE + mouse torque) | default; `interact` from EVA in CargoBay |
+| `EVA` | same 6DOF, suit-scale thrust | `interact` at hatch while aboard |
+| `INTERIOR` | WASD walk, magnetic boots (Phase 5) | `interact` to leave a seat/console |
+| `FOCUSED` | movement suspended; active minigame/console owns input | `interact` at a console; minigame end or `interact` exits |
+
+**Universal interact key (F).** One context-sensitive action drives every transition and interaction: go EVA, board ship, use a console, talk to crew. The HUD `InteractionPrompt` label always states what F will do right now ("F — Board", "F — Grapple Console"); it is hidden when F has no target. Never bind a mode-specific action to F.
+
+**Tool operation is station-based.** Ship-mounted tools are operated from consoles, not from the pilot seat: fly to the debris, park (flight assist holds station), `interact` at the tool's console, run the minigame. There is no tool hotbar or in-flight tool switching — one station per tool. In Phase 3 consoles are *seats* the player switches into directly (no walkable interior yet); Phase 5's walkable interior replaces the seat-switch with physically walking to the console. The EVA suit carries at most **one** handheld tool (Phase 2: grapple arm) with a single "use tool" key that opens its minigame — no selection UI on EVA.
+
+**Crew and stations (Phase 5+, recorded for direction):** the player never switches control to another crewmember. Crew can be *asked* (over comms/dialogue) to man a station; whether and how well they do is relationship-driven. Crew remain characters, not vehicles.
+
 ## Tool System
 
 ### Tool Resource
@@ -155,10 +172,18 @@ Dialogue resources live in `resources/crew/`. Each crewmember has a subdirectory
 
 ### Tool Activation Flow
 
-1. Player aims at debris within tool range (raycast or sphere overlap).
-2. Tool action pressed → HUD shows minigame overlay for `minigame_type`.
+Ship-mounted tools (console/station-based — see "Input Modes and Interaction"):
+
+1. Pilot parks within tool range of the target debris (flight assist holds station).
+2. `interact` at the tool's console → input mode `FOCUSED`, console camera/view, HUD shows minigame overlay for `minigame_type`. Target acquisition (raycast or sphere overlap within `range_meters`) happens from the console.
 3. On minigame success → tool effect applied (PhysicsJoint for grapple, impulse for nudge, etc.).
 4. On minigame failure → tool goes on cooldown, debris may react (increased spin, etc.).
+5. `interact` exits the console back to the previous mode at any time.
+
+EVA handheld tool (single slot, no selection UI):
+
+1. Player aims at debris within tool range.
+2. "Use tool" key → minigame overlay; success/failure as above.
 
 ### Minigame Implementations
 

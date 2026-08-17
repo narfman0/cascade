@@ -10,24 +10,28 @@ Read `docs/architecture.md` before starting. Scene tree, physics approach, and a
 - Units: 1 Godot unit = 1 meter. Velocities in m/s, forces in N, masses in kg.
 - Collision layers: 1 = ship, 2 = character, 3 = debris, 4 = environment (Earth). Ship and character collide with everything including each other (bumping your own hull on EVA is correct behavior).
 - All tuning constants are `@export` vars with the starting values given below — they are starting points for the feel pass, not final.
+- Verification: the godot MCP tools are available (`run_project`, `game_screenshot`, `game_get_errors`, `game_eval`, input simulation) — use them to run the gate checks and capture the review screenshots/clips automatically where possible.
 
 ---
 
 ## Milestone 1 — Travel + Lighting
 
 ### M1.1 Project scaffold
-- [ ] Create Godot 4 project (`project.godot`) at repo root. Directories: `scenes/`, `scripts/`, `resources/`, `assets/`.
+- [ ] Create Godot 4 project (`project.godot`) at repo root, pinned to **Godot 4.7** (installed: 4.7.1 stable). Directories: `scenes/`, `scripts/`, `resources/`, `assets/`. Add `.gitignore` covering `.godot/` and import artifacts.
 - [ ] Project settings:
   - `physics/3d/default_gravity = 0`
   - Physics tick rate 60 Hz (default); do not tie flight logic to render framerate — all force application in `_physics_process`.
   - Renderer: Forward+.
+  - Physics engine: keep the 4.7 default — do not switch engines mid-project.
+  - Main scene: `scenes/game_world.tscn`.
 - [ ] Input map (keyboard + mouse; leave controller bindings for later):
   - `thrust_forward` (W), `thrust_back` (S), `thrust_left` (A), `thrust_right` (D)
   - `thrust_up` (Space), `thrust_down` (C or Ctrl)
   - `roll_left` (Q), `roll_right` (E)
   - Pitch/yaw from relative mouse motion (captured mouse mode)
+  - `interact` (F) — the universal context-sensitive action (see architecture.md "Input Modes and Interaction"): EVA exit/board in M2, consoles and dialogue later. Never bind mode-specific actions to F.
   - `toggle_flight_assist` (X), `toggle_camera` (V), `ui_cancel` releases mouse
-- [ ] Autoload skeletons: `GameState`, `ContractManager`, `OriginShift`, `AudioManager` (`scripts/autoload/`). Empty but registered, with class-level doc comment stating responsibility per architecture.md. Only `GameState` holds anything in M1 (e.g. `flight_assist_enabled`).
+- [ ] Autoload skeletons: `GameState`, `ContractManager`, `OriginShift`, `AudioManager` (`scripts/autoload/`). Empty but registered, with class-level doc comment stating responsibility per architecture.md. In M1 `GameState` holds `flight_assist_enabled` and `input_mode` (enum `InputMode { SHIP_FLIGHT, EVA, INTERIOR, FOCUSED }` per architecture.md), each with a changed signal. Exactly one controller processes input at a time, gated on `input_mode` — build this gating in M1 even though only SHIP_FLIGHT exists yet.
 
 ### M1.2 Newtonian flight model (accuracy is the point)
 - [ ] `scenes/ship.tscn`: `Ship` RigidBody3D per architecture.md tree — `Mesh`, `Thrusters` (Node3D), `CargoBay` (Area3D), `Camera` mount, `Character` (RigidBody3D child, frozen/dormant placeholder for M2).
@@ -93,7 +97,7 @@ Same physics standard as M1: the suit is a small Newtonian body, not a character
 - [ ] FA works identically on EVA (shared logic makes this free). EVA defaults to FA on.
 
 ### M2.2 Exit / enter ship
-- [ ] `eva_toggle` input action (F): exits when aboard, enters when on EVA inside the CargoBay. Ship near-stationary is NOT required — exiting a moving ship is allowed and must inherit velocity correctly.
+- [ ] Enter/exit uses the universal `interact` action (F): exits when aboard, enters when on EVA inside the CargoBay. Drive it through the `input_mode` switch (SHIP_FLIGHT ↔ EVA). HUD shows an `InteractionPrompt` label whenever `interact` has a valid target ("F — EVA" / "F — Board"); hidden otherwise. Ship near-stationary is NOT required — exiting a moving ship is allowed and must inherit velocity correctly.
 - [ ] Add `ExitPoint` (Marker3D) to Ship, positioned **clear of the hull's collision shape** near the hatch (validate: character capsule at ExitPoint does not overlap ship collision — a spawn-overlap ejection pop is a gate failure).
 - [ ] While aboard: Character is `freeze = true` (`FREEZE_MODE_KINEMATIC`) with its CollisionShape3D disabled — it must not collide with the ship interior or contribute contacts while carried.
 - [ ] On exit: Character re-parented from Ship to GameWorld, global transform set to ExitPoint's global transform; collision shape re-enabled, `freeze = false`. Velocity: `linear_velocity = ship.linear_velocity + ship.angular_velocity.cross(exit_point_global_pos - ship.global_position)` (the ω × r term — exiting a rotating ship flings you tangentially); `angular_velocity` copied from ship. Camera and input control transfer to character; ship becomes an uncontrolled free body (keeps its momentum, ship FA disables — it just coasts).

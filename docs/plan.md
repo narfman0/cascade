@@ -41,7 +41,7 @@
 - **Laser Nudge** — CursorHold minigame: hold crosshair on debris surface for required dwell time
 - Procedural debris fields: varying density, spin rates, sizes, materials
 - Contract system v1: objective types (capture N pieces, deorbit field, retrieve specific item), timer, payout
-- Tool switching UI; tool resource definitions in `resources/tools/`
+- Tool consoles: ship-mounted tools operated from seat-based stations (`interact` to enter/exit; no walkable interior yet — see architecture.md "Input Modes and Interaction"); no tool hotbar or in-flight switching. Tool resource definitions in `resources/tools/`
 
 **Done when:** All five tools work, feel distinct, and at least two contract types are completable.
 
