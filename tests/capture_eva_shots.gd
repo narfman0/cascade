@@ -13,10 +13,11 @@ const OUT_DIR: String = "user://shots"
 var _ship: RigidBody3D
 var _suit: RigidBody3D
 var _sunward: Vector3 = Vector3.RIGHT
-## A review camera the harness controls directly. The gameplay rig always sits
-## behind the suit, which is the right choice in play and useless for a portrait
-## — you cannot see the astronaut you are trying to show someone.
-var _review_cam: Camera3D
+## No harness camera: one added here does not reliably win `current` against the
+## rigs already in the scene, which is why the first pass of these shots rendered
+## from behind the ship instead of the intended framing. The EVA rig camera
+## becomes current with the EVA input mode, so pose the *suit* and let it follow
+## — the shots then show exactly what the player sees on EVA.
 
 
 func _ready() -> void:
@@ -35,12 +36,6 @@ func _ready() -> void:
 	_sunward = (OriginShift.to_render(system.get_body(&"sun").true_pos)
 		- _ship.global_position).normalized()
 
-	_review_cam = Camera3D.new()
-	_review_cam.fov = 60.0
-	_review_cam.near = 0.05
-	_review_cam.far = 100000.0
-	add_child(_review_cam)
-
 	# Keep the hull still so the suit can be posed relative to it.
 	_ship.freeze = true
 	GameState.flight_assist_enabled = false
@@ -53,41 +48,31 @@ func _ready() -> void:
 		(_suit.get_node("CameraRig/Camera3D") as Camera3D).current,
 	])
 
-	# 1. At the hatch, ship filling frame — the moment after stepping out.
-	await _pose(_ship.global_position + _hatch_dir() * 5.0 + _sunward * 4.0,
-		_ship.global_position)
-	await _settle(6)
-	await _frame_suit(4.5, _ship.global_position)
-	await _settle(6)
+	# 1. At the hatch, hull filling the frame behind.
+	await _face(_ship.global_position, 9.0)
+	await _settle(20)
 	await _shot("06_eva_at_hatch")
 
-	# 2. Standoff, ship and Earth together — the "don't lose your ride" view.
-	await _pose(_ship.global_position + _hatch_dir() * 12.0 + _sunward * 20.0
-		+ Vector3.UP * 4.0, _ship.global_position)
-	await _settle(6)
-	await _frame_suit(9.0, _ship.global_position, 1.5)
-	await _settle(6)
+	# 2. Standing off, ship and Earth together — the "don't lose your ride" view.
+	await _pose(_ship.global_position + _hatch_dir() * 22.0 + _sunward * 6.0,
+		_ship.global_position)
+	await _settle(20)
 	await _shot("07_eva_standoff")
 
-	# 3. Working distance on a debris piece, hull behind.
+	# 3. Working distance on a debris piece.
 	var debris := world.get_node_or_null("DebrisField/Debris_001") as Node3D
 	if debris:
-		await _pose(debris.global_position + _sunward * 11.0 + Vector3.UP * 2.0,
-			debris.global_position)
-		await _settle(6)
-		await _frame_suit(6.0, debris.global_position)
-		await _settle(6)
+		await _face(debris.global_position, 10.0)
+		await _settle(20)
 		await _shot("08_eva_at_debris")
 
-	# 4. Earth behind the suit — scale reference.
-	await _pose(_ship.global_position + _hatch_dir() * 10.0 + _sunward * 8.0,
+	# 4. Earth as the backdrop — scale reference.
+	await _pose(_ship.global_position + _hatch_dir() * 12.0,
 		OriginShift.to_render(earth.true_pos))
-	await _settle(6)
-	await _frame_suit(5.0, OriginShift.to_render(earth.true_pos), 1.0)
-	await _settle(6)
+	await _settle(20)
 	await _shot("09_eva_earthside")
 
-	# 5. Back in the cargo bay, about to board.
+	# 5. Back at the cargo bay, about to board.
 	var bay := _ship.get_node("CargoBay") as Area3D
 	for _i in 20:
 		_suit.global_position = bay.global_position
@@ -122,17 +107,12 @@ func _pose(where: Vector3, look_at_target: Vector3) -> void:
 		await get_tree().physics_frame
 
 
-## Look at the suit from `distance` metres, sunlit, with `backdrop` behind it.
-func _frame_suit(distance: float, backdrop: Vector3, lift: float = 0.6) -> void:
-	var suit_pos: Vector3 = _suit.global_position
-	# Put the camera between the sun and the suit so we see its lit side, and
-	# offset off the sun-suit axis so the backdrop falls behind the figure.
-	var away_from_backdrop: Vector3 = (suit_pos - backdrop).normalized()
-	var dir: Vector3 = (_sunward * 0.65 + away_from_backdrop * 0.75).normalized()
-	_review_cam.global_position = suit_pos + dir * distance + Vector3.UP * lift
-	_review_cam.look_at(suit_pos, Vector3.UP)
-	_review_cam.current = true
-	await get_tree().process_frame
+## Pose the suit facing `subject`, positioned so the sun is behind the rig
+## camera — otherwise the camera looks at the suit's shadow side and, with only
+## faint earthshine for fill, the frame is near black.
+func _face(subject: Vector3, standoff: float) -> void:
+	var from: Vector3 = subject - _sunward * standoff + Vector3.UP * (standoff * 0.15)
+	await _pose(from, subject)
 
 
 func _settle(frames: int) -> void:
