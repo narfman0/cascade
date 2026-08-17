@@ -6,6 +6,11 @@ _This file is populated by agents. Do not edit manually._
 
 Read `docs/architecture.md` before starting. Scene tree, physics approach, and autoload responsibilities defined there are authoritative.
 
+**Conventions (apply everywhere):**
+- Units: 1 Godot unit = 1 meter. Velocities in m/s, forces in N, masses in kg.
+- Collision layers: 1 = ship, 2 = character, 3 = debris, 4 = environment (Earth). Ship and character collide with everything including each other (bumping your own hull on EVA is correct behavior).
+- All tuning constants are `@export` vars with the starting values given below — they are starting points for the feel pass, not final.
+
 ---
 
 ## Milestone 1 — Travel + Lighting
@@ -31,13 +36,13 @@ Read `docs/architecture.md` before starting. Scene tree, physics approach, and a
   - `can_sleep = false`
   - Explicit `mass` (pick a plausible value, e.g. 12000 kg) and a CollisionShape3D whose extents give a sane auto-computed inertia tensor. Do not fight the inertia tensor with hacks; if rotation feels wrong, adjust shape or use `PhysicsServer3D` inertia override, and comment why.
 - [ ] `scripts/ship_controller.gd`:
-  - Read the six translation inputs into a local-space thrust vector; transform to global with `basis` before `apply_central_force()`. Force = direction * per-axis max thrust (define `thrust_main` forward, `thrust_rcs` for lateral/vertical/reverse — main engine stronger than RCS is fine and reads as realistic).
-  - Roll from Q/E, pitch/yaw from accumulated mouse relative motion → local torque vector, transform to global, `apply_torque()`. Clamp per-axis torque to defined maxima.
+  - Read the six translation inputs into a local-space thrust vector; transform to global with `basis` before `apply_central_force()`. Force = direction * per-axis max thrust. Starting values: `thrust_main = 48000.0` N forward (~4 m/s² at 12 t), `thrust_rcs = 15000.0` N lateral/vertical/reverse (~1.25 m/s²).
+  - Rotation is a **torque command, not direct rotation**. Each physics tick: sum the mouse relative-motion events received since the last tick (collect in `_input`, consume in `_physics_process`, then zero the accumulator — never integrate across ticks). Commanded torque = `clamp(mouse_delta * mouse_torque_sensitivity, -max_torque, max_torque)` per axis for pitch/yaw; roll from Q/E at `max_torque`. Transform local torque vector to global, `apply_torque()`. Starting values: `max_torque = 20000.0` N·m per axis, `mouse_torque_sensitivity` tuned so a brisk mouse sweep saturates the clamp. Mouse idle ⇒ zero commanded torque ⇒ ship keeps rotating (Newtonian); FA is what stops rotation, never the mouse mapping.
   - No velocity clamping, no artificial speed limit, no drag. Velocity persists exactly (verify: thrust to speed, release input, velocity magnitude constant indefinitely).
   - All input→force in `_physics_process` using forces (not impulses) so behavior is tick-rate independent.
 - [ ] Flight assist (FA):
-  - Translation: for each local axis with no player input this tick, compute counter-force `-v_axis * assist_gain`, clamp magnitude to that axis's max thrust (assist can never out-thrust the real thrusters). Axes with active input get raw thrust — assist never fights the player.
-  - Rotation: same scheme on angular velocity per local axis, clamped to max torque.
+  - Translation: for each local axis with no player input this tick, compute counter-force `-v_axis * assist_gain`, clamp magnitude to that axis's max thrust (assist can never out-thrust the real thrusters). Axes with active input get raw thrust — assist never fights the player. Starting value: `assist_gain = mass * 2.0` (converges in a few seconds without overshoot; tune from there).
+  - Rotation: same scheme on angular velocity per local axis, clamped to max torque. Starting value: `assist_angular_gain = 40000.0`.
   - FA state lives in `GameState.flight_assist_enabled`, toggled by input action, announced via signal so HUD can react.
   - With FA on and no input, ship must converge to full stop (linear and angular) without oscillation — tune gain, don't add snapping/lerp-to-zero shortcuts.
 - [ ] Fuel: float on Ship, drained proportional to |thrust| * delta (assist burns fuel too — it's real thruster fire). No consequences at 0 yet beyond thrust cutoff; keep the tank generous.
@@ -49,7 +54,7 @@ Read `docs/architecture.md` before starting. Scene tree, physics approach, and a
 
 ### M1.4 Environment + lighting (get this solid now)
 - [ ] `scenes/game_world.tscn` — `GameWorld` root per architecture.md.
-- [ ] Earth: large sphere (StaticBody3D + MeshInstance3D) far below/behind spawn. Material: simple albedo texture or procedural blue-white; unshaded is not acceptable — it must take light so day/night terminator reads.
+- [ ] Earth: sphere of radius ~2000 m centered ~12000 m below spawn (compressed scale per architecture.md — it should fill a large arc of the "down" view but never be reachable in normal play; no gravity from it in M1/M2). StaticBody3D + MeshInstance3D. Material: simple albedo texture or procedural blue-white; unshaded is not acceptable — it must take light so day/night terminator reads.
 - [ ] Sun: single `DirectionalLight3D`, intensity high, shadows enabled (directional shadow tuned so ship self-shadows crisply at gameplay range).
 - [ ] `WorldEnvironment`:
   - Sky: dark starfield (procedural `Sky` with star texture or generated star panorama in `assets/`). Space is black, not navy.
@@ -62,7 +67,7 @@ Read `docs/architecture.md` before starting. Scene tree, physics approach, and a
 ### M1.5 HUD
 - [ ] CanvasLayer HUD scene:
   - Velocity readout: magnitude (m/s) plus a prograde/retrograde style directional marker relative to ship facing.
-  - Orientation indicator (simple attitude reference or nav-ball placeholder).
+  - Orientation indicator: attitude relative to the **global inertial frame** (world axes), shown as pitch/roll/yaw readouts or a minimal nav-ball placeholder. Reference frame choice is fixed — do not reference Earth or velocity for attitude (the prograde marker already covers velocity).
   - Fuel gauge.
   - FA indicator: clear on/off state, updates via `GameState` signal.
 - [ ] Calm visual language per narrative.md — thin lines, muted color, no red alerts.
@@ -88,9 +93,11 @@ Same physics standard as M1: the suit is a small Newtonian body, not a character
 - [ ] FA works identically on EVA (shared logic makes this free). EVA defaults to FA on.
 
 ### M2.2 Exit / enter ship
-- [ ] `eva_exit` input action (F): only valid when aboard and ship near-stationary is NOT required — exiting a moving ship is allowed and must inherit velocity correctly.
-- [ ] On exit: Character re-parented from Ship to GameWorld preserving global transform; `linear_velocity` = ship's velocity at the character's position (include `angular_velocity × r` term so exiting a rotating ship flings you correctly); `angular_velocity` inherited from ship. Character physics unfrozen; camera and input control transfer to character; ship becomes uncontrolled free body (keeps its momentum, FA on ship disables — it just coasts).
-- [ ] On enter: valid only while Character overlaps ship `CargoBay` Area3D; `eva_exit` re-parents Character back under Ship, freezes character physics, restores ship control and ship camera. Relative velocity at entry is simply absorbed (no docking damage — peaceful game).
+- [ ] `eva_toggle` input action (F): exits when aboard, enters when on EVA inside the CargoBay. Ship near-stationary is NOT required — exiting a moving ship is allowed and must inherit velocity correctly.
+- [ ] Add `ExitPoint` (Marker3D) to Ship, positioned **clear of the hull's collision shape** near the hatch (validate: character capsule at ExitPoint does not overlap ship collision — a spawn-overlap ejection pop is a gate failure).
+- [ ] While aboard: Character is `freeze = true` (`FREEZE_MODE_KINEMATIC`) with its CollisionShape3D disabled — it must not collide with the ship interior or contribute contacts while carried.
+- [ ] On exit: Character re-parented from Ship to GameWorld, global transform set to ExitPoint's global transform; collision shape re-enabled, `freeze = false`. Velocity: `linear_velocity = ship.linear_velocity + ship.angular_velocity.cross(exit_point_global_pos - ship.global_position)` (the ω × r term — exiting a rotating ship flings you tangentially); `angular_velocity` copied from ship. Camera and input control transfer to character; ship becomes an uncontrolled free body (keeps its momentum, ship FA disables — it just coasts).
+- [ ] On enter: valid only while Character overlaps ship `CargoBay` Area3D; freeze character and disable its collision **before** re-parenting under Ship (order matters — no contact frame between the two bodies during the transition), restore ship control and ship camera. Relative velocity at entry is simply absorbed (no docking damage — peaceful game).
 - [ ] HUD swaps to EVA variant: adds EVA fuel gauge and a ship marker (direction + distance to ship, always visible — getting lost must be recoverable).
 
 ### M2.3 EVA fuel
