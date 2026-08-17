@@ -207,58 +207,77 @@ budgets and verification plan live there; this is the build order.
 
 ### PR4 (stretch — owner call): atmosphere rim shell, clouds, geomorphing, more sites (Canaveral, Baikonur, Shanghai, Tycho, Olympus Mons).
 
-## Track SD — Stations and Docking (ACTIVE — implement first)
+## Track SD — Stations and Docking (SD1 + SD2 COMPLETE — SD3 remains stretch)
 
 Design authority: architecture.md "Stations and Docking". Read it, then this.
 
 ### SD1 — Stations on rails + destination interface
 
 **SD1.1 Extract the orbit math**
-- [ ] New `scripts/world/orbit_math.gd` (`class_name OrbitMath`), static funcs `offset_at(t, radius, period, phase, inclination) -> Array` and `velocity_offset_at(...) -> Array` — 64-bit `[x,y,z]`, exactly the formulas now inlined in `CelestialBody.position_at/velocity_at` (circular orbit, plane tilted about X).
-- [ ] Refactor `CelestialBody` to call them. `tests/travel_test.gd` must stay green unchanged — it asserts orbit integrity and the velocity/position-derivative match, so it IS the refactor's safety net.
+- [x] New `scripts/world/orbit_math.gd` (`class_name OrbitMath`), static funcs `offset_at(t, radius, period, phase, inclination) -> Array` and `velocity_offset_at(...) -> Array` — 64-bit `[x,y,z]`, exactly the formulas now inlined in `CelestialBody.position_at/velocity_at` (circular orbit, plane tilted about X).
+- [x] Refactor `CelestialBody` to call them. `tests/travel_test.gd` must stay green unchanged — it asserts orbit integrity and the velocity/position-derivative match, so it IS the refactor's safety net.
 
 **SD1.2 NavTarget base class (the destination interface)**
-- [ ] New `scripts/world/nav_target.gd`: `class_name NavTarget extends Node3D` with overridable methods: `position_at(t) -> Array`, `velocity_at(t) -> Array`, `arrival_standoff() -> float`, `influence_radius() -> float`, `frame_depth() -> int`, `nav_display_name() -> String`, `nav_note() -> String`, `is_nav_destination() -> bool`. GDScript has no interfaces — a base class is the honest version.
-- [ ] `CelestialBody extends NavTarget`; move `def.display_name` / `def.nav_note` / `def.is_destination` access behind the new methods.
-- [ ] Update every call site that reaches into `.def` from outside: `autopilot.gd` (3 sites: engaged emit, arrival name, status line), `nav_console.gd` (row text, footer note), `solar_system.gd` (`destinations()` filter, `reference_body()` depth/influence). Grep for `\.def\.` outside `celestial_body.gd` afterwards — zero hits is the done condition.
-- [ ] `Autopilot.target`, `engage()`, `_aim_point()`, `estimate_transfer()` retype `CelestialBody` → `NavTarget`. `SolarSystem.destinations()` returns `Array[NavTarget]`.
+- [x] New `scripts/world/nav_target.gd`: `class_name NavTarget extends Node3D` with overridable methods: `position_at(t) -> Array`, `velocity_at(t) -> Array`, `arrival_standoff() -> float`, `influence_radius() -> float`, `frame_depth() -> int`, `nav_display_name() -> String`, `nav_note() -> String`, `is_nav_destination() -> bool`. GDScript has no interfaces — a base class is the honest version. (NavTarget also holds the `true_pos` cache both subclasses refresh, so `reference_body()` reads one field.)
+- [x] `CelestialBody extends NavTarget`; move `def.display_name` / `def.nav_note` / `def.is_destination` access behind the new methods.
+- [x] Update every call site that reaches into `.def` from outside: `autopilot.gd` (3 sites: engaged emit, arrival name, status line), `nav_console.gd` (row text, footer note), `solar_system.gd` (`destinations()` filter, `reference_body()` depth/influence). Grep for `\.def\.` outside `celestial_body.gd` afterwards — zero hits is the done condition. (Tests updated too: travel_test's Earth-frame check is now an identity comparison, the Moon radius check measures constancy against t=0, and display names go through `nav_display_name()`.)
+- [x] `Autopilot.target`, `engage()`, `_aim_point()`, `estimate_transfer()` retype `CelestialBody` → `NavTarget`. `SolarSystem.destinations()` returns `Array[NavTarget]`.
 
 **SD1.3 OrbitalStation**
-- [ ] `scripts/world/station_def.gd`: `StationDef extends Resource` — `id`, `display_name`, `parent_id` (body), `orbit_radius`, `orbit_period`, `orbit_phase`, `inclination`, `nav_note`, `standoff` (default 200.0), `influence` (default 2000.0).
-- [ ] `scripts/world/orbital_station.gd`: `OrbitalStation extends NavTarget`. Position = parent body's `position_at(t)` + `OrbitMath.offset_at(...)`; velocity likewise. Recomputes render position from true space every `_process` (do NOT join `origin_shiftable` — trap #3). `frame_depth()` = parent's depth + 1, so the deepest-wins reference rule resolves the station without special cases.
-- [ ] Station scene `scenes/stations/meridian_relay.tscn`: build from `assets/.../SM_Ship_Station_06.gltf` (60×101×52 m — the manifest's "good first docking target"; fetch via `./fetch_assets.sh`, it is in the POLYGON_Scifi_Space pack) plus a nav-light emissive or two. StaticBody3D collision (layer 4) from 2–3 box shapes approximating the tower — NOT a trimesh of the whole mesh.
-- [ ] First station: "Meridian Relay", Earth orbit — `orbit_radius 9000.0`, `orbit_period 2200.0`, phase ~2.0 so it is not on top of spawn. Registered by GameWorld bootstrap (follow the existing `_wire_systems` pattern; SolarSystem gains `register_station()` / stations included in `destinations()` and `reference_body()`).
-- [ ] Nav console shows it with live distance/ETA (should require zero console changes if SD1.2 is done right — that is itself the check).
+- [x] `scripts/world/station_def.gd`: `StationDef extends Resource` — `id`, `display_name`, `parent_id` (body), `orbit_radius`, `orbit_period`, `orbit_phase`, `inclination`, `nav_note`, `standoff` (default 200.0), `influence` (default 2000.0).
+- [x] `scripts/world/orbital_station.gd`: `OrbitalStation extends NavTarget`. Position = parent body's `position_at(t)` + `OrbitMath.offset_at(...)`; velocity likewise. Recomputes render position from true space every frame (driven by `SolarSystem._update_bodies` alongside the bodies; NOT in `origin_shiftable` — trap #3). `frame_depth()` = parent's depth + 1, so the deepest-wins reference rule resolves the station without special cases.
+- [x] Station scene `scenes/stations/meridian_relay.tscn`: built from `SM_Ship_Station_06.gltf` (60×101×52 m, base at origin, tower up +Y) plus emissive nav lights and a glowing capture collar at the port. StaticBody3D collision (environment layer) from 3 box shapes measured off the mesh's per-height-band extents — NOT a trimesh.
+- [x] First station: "Meridian Relay", Earth orbit — `orbit_radius 9000.0`, `orbit_period 2200.0`, phase 2.0. Registered by GameWorld bootstrap via `SolarSystem.register_station()`; included in `destinations()` and `reference_body()`.
+- [x] Nav console shows it with live distance/ETA — zero console logic changes were needed, which was itself the SD1.2 check.
 
-**SD1 gate (extend `tests/travel_test.gd` or new `tests/station_test.gd`):**
-- [ ] Station's distance from parent body equals `orbit_radius` at 200 sampled times (same style as the Moon check).
-- [ ] Autopilot `engage(station)` converges: arrives at ~`standoff`, velocity-matched to the station (which is MOVING — this exercises the interface + intercept math end to end).
-- [ ] `reference_body()` inside 2 km of the station returns the station; flight assist holds station in its frame (relative velocity < 0.5 after settle).
-- [ ] Both existing suites green.
+**SD1 gate (`tests/station_test.gd`) — ALL GREEN:**
+- [x] Station's distance from parent body equals `orbit_radius` at 200 sampled times (max error 0.000 m).
+- [x] Autopilot `engage(station)` converges: arrives 151 m off (standoff 200), velocity-matched to 0.00 m/s relative. travel_test also now flies the station as a 15th destination.
+- [x] `reference_body()` at the standoff returns the station; flight assist settles to 0.033 m/s relative in its frame.
+- [x] Both existing suites green.
 
 ### SD2 — Docking
 
 **SD2.1 DockingPort**
-- [ ] `scripts/docking_port.gd`: `DockingPort extends Node3D`, child `Area3D` capture volume (box ~6×6×10 m extending along the port's +Z approach axis), joins group `&"docking_ports"`. Exports: `capture_speed_max = 1.5` (m/s, relative), `capture_angle_max_deg = 20.0`. One port on Meridian Relay, axis pointing away from the tower.
-- [ ] `scripts/docking_computer.gd`: node on Ship (like Autopilot). Each physics tick while not docked: nearest port within its volume → check relative velocity (`ship.linear_velocity - port.station_velocity()`) and alignment (ship −Z vs port axis). All conditions met → capture.
+- [x] `scripts/docking_port.gd`: `DockingPort extends Node3D`, child `Area3D` capture volume (box 6×6×10 m extending along the port's +Z approach axis), joins group `&"docking_ports"`. Exports: `capture_speed_max = 1.5` (m/s, relative), `capture_angle_max_deg = 20.0`. One port on Meridian Relay at (0, 35, 23), +Z face, axis pointing away from the tower.
+- [x] `scripts/docking_computer.gd`: node on Ship (like Autopilot). Each physics tick while not docked: port whose volume holds the ship → check relative velocity (`ship.linear_velocity - port.station_velocity()`) and alignment (ship −Z vs port axis). All conditions met → capture.
 
 **SD2.2 The docked state**
-- [ ] Capture sequence, in order: `ship.freeze = true` (FREEZE_MODE_KINEMATIC) → **remove ship from `origin_shiftable` group** → reparent ship under the port preserving global transform → zero relative motion → `GameState.docked = true` (new bool + signal on GameState). Order matters: the station recomputes from true space each frame and the ship inherits through the tree; leaving the ship in the shiftable group double-moves it on the next origin shift. This is trap #3 wearing a new hat — it WILL happen if skipped, and it will look like the 16 km lurch bug.
-- [ ] While docked: ship_controller and autopilot stand down (same guard pattern as `autopilot_active`); nav console may open but `engage` refuses; HUD shows "DOCKED — Meridian Relay" and `F — Undock` (interact priority while docked: undock beats EVA-exit).
-- [ ] Ship fuel refills while docked (station services; instant for now, same as EVA refill precedent).
-- [ ] Undock, in order: reparent ship back under GameWorld (preserve global transform) → re-add to `origin_shiftable` → `freeze = false` → `linear_velocity = station velocity` + push-off `~1.0 m/s` along port axis → `docked = false`. Flight assist on.
-- [ ] EVA while docked: `request_exit` allowed (suit exits at hatch as normal, ship stays docked). Boarding returns to the docked ship. No special casing beyond the interact priority.
+- [x] Capture sequence, in order: `ship.freeze = true` (FREEZE_MODE_KINEMATIC) → **remove ship from `origin_shiftable` group** → reparent ship under the port preserving global transform → **take the ship's body out of the physics space** (see note below — freeze alone is NOT enough) → zero relative motion → `GameState.docked = true` (new bool + signal on GameState).
+- [x] While docked: ship_controller and autopilot stand down (`GameState.docked` guard); nav console may open but `engage` refuses (`can_engage()` checks docked); HUD shows "DOCKED — Meridian Relay" and `F — Undock` (interact priority while docked: undock beats EVA-exit).
+- [x] Ship fuel refills while docked (station services; instant, same as EVA refill precedent).
+- [x] Undock, in order: reparent ship back under GameWorld (preserve global transform; re-entering the world also re-adds the body to the physics space) → re-add to `origin_shiftable` → `freeze = false` → `linear_velocity = station velocity` + push-off `1.0 m/s` along port axis → `docked = false`. Flight assist on.
+- [x] EVA while docked: `request_exit` allowed; the DockingComputer refreshes the frozen hull's `linear_velocity` to the station's each tick, so the suit exits co-moving (trap #5). Boarding returns to the docked ship.
 
 **SD2.3 Approach HUD**
-- [ ] When inside a port's capture volume (and not docked): readout block — distance to port, closing speed, axis error in degrees; each line flips subtly (modulate) when within capture tolerance. Calm per tone; no red.
+- [x] When inside a port's capture volume (and not docked): readout block — distance to port, relative speed, axis error in degrees; speed and axis lines flip modulate to a calm green tint when within capture tolerance. No red.
 
-**SD2 gate (`tests/docking_test.gd`, headless):**
-- [ ] Scripted clean approach (co-moving with station, drift in aligned at 0.5 m/s) → captures; ship frozen, parented under port, `docked == true`, NOT in shiftable group.
-- [ ] Hot approach (3 m/s) does NOT capture; misaligned (35°) does NOT capture.
-- [ ] Docked through an origin shift (force `OriginShift.shift_by(Vector3(20000,0,0))` while docked) — ship stays exactly at the port (this is the trap-#3 regression test).
-- [ ] Docked through 60 s of sim time — station orbits on, ship rides it, no drift relative to port.
-- [ ] Undock: free flight restored, velocity = station velocity + push-off, back in shiftable group, both other suites still green.
-- [ ] Screenshots via a `capture_docking_shots.gd` harness: approach with HUD readout, docked wide shot, undock push-off. (Reuse the review-camera pattern from `capture_eva_shots.gd`; remember trap #2 for posing.)
+**SD2 gate (`tests/docking_test.gd`) — ALL GREEN:**
+- [x] Scripted clean approach (co-moving with station, drift in aligned at 0.5 m/s) → captures; ship frozen, parented under port, `docked == true`, NOT in shiftable group, fuel topped up.
+- [x] Hot approach (3 m/s) does NOT capture; misaligned (35°) does NOT capture.
+- [x] Docked through an origin shift (`OriginShift.shift_by(Vector3(20000,0,0))`) — ship stays exactly at the port (local drift 0.000000 m).
+- [x] Docked through 60 s of sim time — station orbits on, ship rides it, zero drift relative to port.
+- [x] Undock: free flight restored, velocity = station velocity + push-off (error 0.0000 m/s), back in shiftable group, both other suites re-run green.
+- [x] Screenshots via `tests/capture_docking_shots.gd` (xvfb): `screenshots/11_dock_approach.png` (nose at the collar, APPROACH readout, REL out of tolerance), `12_docked_wide.png` (docked hull at the glowing collar, tower + Earth, DOCKED HUD), `13_undock.png` (push-off separation, readout live).
+
+Fixed on the way through, worth knowing:
+- **Freeze is not enough for a docked ship.** Even frozen kinematic, the physics
+  server writes the body's global transform back to the node every physics
+  step, one frame behind the rail-driven parent — the ship's local offset under
+  the port grew ~0.8 m per frame. The fix: `PhysicsServer3D.body_set_space(rid,
+  RID())` on capture (after the reparent — re-entering the world re-adds a body
+  to the space, which is also what silently restores it on undock). Same
+  reasoning as the stowed EVA suit. The CargoBay Area3D is a separate physics
+  object and keeps detecting EVA boarding while the hull is out of the space.
+- **Capture must re-arm by distance, not volume exit.** The undock reparent
+  resets the Area3D overlap for a frame (reads as exit/re-enter), and the
+  push-off is slow, aligned, and still inside the volume — without a re-arm
+  distance (`rearm_distance = 14 m` > volume reach) the ship recaptures on the
+  next tick.
+- The gameplay camera's damped follow trails a target that teleports or
+  co-moves fast; the docking screenshot harness parents its review camera under
+  the station (which translates ~2.6 m/frame but never rotates) so framing
+  holds across settle frames.
 
 ### SD3 (stretch — do not start without owner)
 - [ ] Assisted approach via ManeuverMinigame; ship-to-ship ports (host stays live, guest freezes — the stowed-suit pattern).

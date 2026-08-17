@@ -1,4 +1,4 @@
-[gd_scene load_steps=17 format=3 uid="uid://dgm3p8jkq2n7f"]
+[gd_scene load_steps=18 format=3 uid="uid://dgm3p8jkq2n7f"]
 
 [ext_resource type="PackedScene" uid="uid://b7x2n4kq8ma1p" path="res://scenes/ship.tscn" id="1_ship"]
 [ext_resource type="PackedScene" uid="uid://c8h4mn2p9r7ax" path="res://scenes/hud.tscn" id="2_hud"]
@@ -6,6 +6,7 @@
 [ext_resource type="Script" path="res://scripts/world/solar_system.gd" id="4_system"]
 [ext_resource type="Script" path="res://scripts/world/orbital_anchor.gd" id="5_anchor"]
 [ext_resource type="Shader" path="res://assets/shaders/starfield.gdshader" id="6_stars"]
+[ext_resource type="PackedScene" uid="uid://dnq7v2mer1s5k" path="res://scenes/stations/meridian_relay.tscn" id="7_station"]
 
 [sub_resource type="ShaderMaterial" id="Sky_mat"]
 shader = ExtResource("6_stars")
@@ -162,6 +163,8 @@ surface_material_override/0 = SubResource("Material_debris")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="DebrisField/Debris_008"]
 shape = SubResource("BoxShape_debris_a")
+
+[node name="MeridianRelay" parent="." instance=ExtResource("7_station")]
 
 [node name="Ship" parent="." instance=ExtResource("1_ship")]
 

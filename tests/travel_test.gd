@@ -57,8 +57,8 @@ func _report_spawn(system: SolarSystem, ship: RigidBody3D) -> void:
 	print("  ship velocity   %.1f m/s absolute" % ship.linear_velocity.length())
 
 	var ref := system.reference_body(true_pos)
-	_check(ref != null and ref.def.id == &"earth", "reference frame is Earth",
-		"(got %s)" % (ref.def.display_name if ref else "none"))
+	_check(ref == earth, "reference frame is Earth",
+		"(got %s)" % (ref.nav_display_name() if ref else "none"))
 	_check(absf(altitude - SolarSystemData.SPAWN_ALTITUDE) < 50.0,
 		"spawn altitude matches SPAWN_ALTITUDE", "(%.0f m)" % altitude)
 	# Station-keeping: the ship should start matched to Earth, not to the Sun.
@@ -81,16 +81,19 @@ func _test_bodies(system: SolarSystem) -> void:
 		"(%d bodies)" % system.bodies.size())
 
 	# Moons must follow their planets: a moon's distance from its parent should
-	# stay at its orbit radius no matter how far the clock advances.
+	# stay constant at its orbit radius no matter how far the clock advances.
 	var moon := system.get_body(&"moon")
 	var earth := system.get_body(&"earth")
+	var radius_0: float = OriginShift.dv_length(
+		OriginShift.dv_sub(moon.position_at(0.0), earth.position_at(0.0))
+	)
 	var worst: float = 0.0
 	for i in 200:
 		var t: float = float(i) * 137.0
 		var d: float = OriginShift.dv_length(
 			OriginShift.dv_sub(moon.position_at(t), earth.position_at(t))
 		)
-		worst = maxf(worst, absf(d - moon.def.orbit_radius))
+		worst = maxf(worst, absf(d - radius_0))
 	_check(worst < 1.0, "Moon holds its orbit radius around Earth",
 		"(max error %.3f m)" % worst)
 
@@ -111,18 +114,18 @@ func _test_bodies(system: SolarSystem) -> void:
 
 func _test_transfers(system: SolarSystem, ship: RigidBody3D, autopilot: Autopilot) -> void:
 	print("\n== transfers ==")
-	print("  %-10s %12s %12s %10s %8s" % ["target", "distance", "sim time", "real", "warp"])
+	print("  %-14s %12s %12s %10s %8s" % ["target", "distance", "sim time", "real", "warp"])
 	var worst_real: float = 0.0
 
 	for body in system.destinations():
 		var result := _fly_to(body, ship, autopilot)
 		if result.is_empty():
 			_failures += 1
-			print("  FAIL  %s did not converge" % body.def.display_name)
+			print("  FAIL  %s did not converge" % body.nav_display_name())
 			continue
 		worst_real = maxf(worst_real, result["real_seconds"])
-		print("  %-10s %12s %12s %10s %8.1fx" % [
-			body.def.display_name,
+		print("  %-14s %12s %12s %10s %8.1fx" % [
+			body.nav_display_name(),
 			"%.0f km" % (result["distance"] / 1000.0),
 			_clock(result["sim_seconds"]),
 			_clock(result["real_seconds"]),
@@ -136,7 +139,7 @@ func _test_transfers(system: SolarSystem, ship: RigidBody3D, autopilot: Autopilo
 
 
 ## Engage, then run the integrator until arrival. Returns {} if it never lands.
-func _fly_to(body: CelestialBody, ship: RigidBody3D, autopilot: Autopilot) -> Dictionary:
+func _fly_to(body: NavTarget, ship: RigidBody3D, autopilot: Autopilot) -> Dictionary:
 	if not autopilot.engage(body):
 		return {}
 	var warp: float = SimClock.warp
@@ -161,7 +164,7 @@ func _fly_to(body: CelestialBody, ship: RigidBody3D, autopilot: Autopilot) -> Di
 	if park_error > maxf(standoff * 0.25, autopilot.arrival_distance_tolerance * 2.0):
 		_failures += 1
 		print("  FAIL  %s parked %.0f m off standoff (%.0f m)" % [
-			body.def.display_name, park_error, standoff])
+			body.nav_display_name(), park_error, standoff])
 
 	var body_vel: Array = body.velocity_at(SimClock.sim_time)
 	var rel := Vector3(
@@ -172,7 +175,7 @@ func _fly_to(body: CelestialBody, ship: RigidBody3D, autopilot: Autopilot) -> Di
 	if rel.length() > autopilot.arrival_speed_tolerance * 2.0:
 		_failures += 1
 		print("  FAIL  %s arrival not velocity-matched (%.1f m/s)" % [
-			body.def.display_name, rel.length()])
+			body.nav_display_name(), rel.length()])
 
 	return {
 		"distance": autopilot._total_distance,

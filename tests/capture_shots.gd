@@ -89,7 +89,7 @@ func _shot(label: String, ship: Node3D = null, subject: CelestialBody = null) ->
 		var forward: Vector3 = -cam.global_basis.z
 		var radius: float = (subject.get_node("Mesh") as MeshInstance3D).scale.x
 		note = "  [%s: %.1f° wide, %.0f° off-axis]" % [
-			subject.def.display_name,
+			subject.nav_display_name(),
 			rad_to_deg(2.0 * atan(radius / maxf(to_subject.length(), 0.001))),
 			rad_to_deg(forward.angle_to(to_subject.normalized())),
 		]

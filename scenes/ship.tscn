@@ -1,6 +1,7 @@
-[gd_scene load_steps=15 format=3 uid="uid://b7x2n4kq8ma1p"]
+[gd_scene load_steps=16 format=3 uid="uid://b7x2n4kq8ma1p"]
 
 [ext_resource type="Script" path="res://scripts/ship_controller.gd" id="1_ship"]
+[ext_resource type="Script" path="res://scripts/docking_computer.gd" id="7_dock"]
 [ext_resource type="Script" path="res://scripts/camera_rig.gd" id="2_cam"]
 [ext_resource type="Script" path="res://scripts/eva_controller.gd" id="3_eva"]
 [ext_resource type="Script" path="res://scripts/autopilot.gd" id="4_auto"]
@@ -66,6 +67,9 @@ shape = SubResource("BoxShape_hull")
 
 [node name="Autopilot" type="Node" parent="."]
 script = ExtResource("4_auto")
+
+[node name="DockingComputer" type="Node" parent="."]
+script = ExtResource("7_dock")
 
 [node name="Thrusters" type="Node3D" parent="."]
 

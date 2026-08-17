@@ -64,7 +64,7 @@ signal arrived(target_name: String)
 signal cancelled(reason: String)
 
 var phase: Phase = Phase.IDLE
-var target: CelestialBody = null
+var target: NavTarget = null
 
 var _ship: RigidBody3D
 var _system: SolarSystem
@@ -91,10 +91,12 @@ func setup(system: SolarSystem) -> void:
 ## --- Engage / cancel ---------------------------------------------------------
 
 func can_engage() -> bool:
-	return phase == Phase.IDLE and _ship != null and _system != null
+	# Docked means physically attached to a port — the station undocks you, the
+	# autopilot does not tear you off it.
+	return phase == Phase.IDLE and _ship != null and _system != null and not GameState.docked
 
 
-func engage(destination: CelestialBody) -> bool:
+func engage(destination: NavTarget) -> bool:
 	if not can_engage() or destination == null:
 		return false
 	target = destination
@@ -121,7 +123,7 @@ func engage(destination: CelestialBody) -> bool:
 	GameState.autopilot_active = true
 	phase = Phase.TRANSFER
 
-	engaged.emit(target.def.display_name, SimClock.real_span(plan.sim_seconds))
+	engaged.emit(target.nav_display_name(), SimClock.real_span(plan.sim_seconds))
 	return true
 
 
@@ -202,7 +204,7 @@ func _plan_warp(sim_seconds: float) -> float:
 ## What a transfer to `body` would cost, without engaging. The nav console shows
 ## this so the player chooses a destination knowing the price in time.
 ## Returns { distance, sim_seconds, real_seconds, warp }.
-func estimate_transfer(body: CelestialBody) -> Dictionary:
+func estimate_transfer(body: NavTarget) -> Dictionary:
 	if body == null or _ship == null:
 		return {"distance": 0.0, "sim_seconds": 0.0, "real_seconds": 0.0, "warp": 1.0}
 	var from_pos: Array = OriginShift.to_true(_ship.global_position)
@@ -223,7 +225,7 @@ func estimate_transfer(body: CelestialBody) -> Dictionary:
 
 ## Standoff point: on the near side of the body, so we arrive facing it rather
 ## than through it.
-func _aim_point(body: CelestialBody, at_sim_time: float, from_pos: Array) -> Array:
+func _aim_point(body: NavTarget, at_sim_time: float, from_pos: Array) -> Array:
 	var body_pos: Array = body.position_at(at_sim_time)
 	var outward: Array = OriginShift.dv_normalized(OriginShift.dv_sub(from_pos, body_pos))
 	if OriginShift.dv_length(outward) < 0.5:
@@ -319,7 +321,7 @@ func _emit_progress(distance: float) -> void:
 
 
 func _complete() -> void:
-	var name_arrived: String = target.def.display_name
+	var name_arrived: String = target.nav_display_name()
 	_vel_rel = [0.0, 0.0, 0.0]
 	_release_to_physics()
 	phase = Phase.IDLE
@@ -369,7 +371,7 @@ func status_line() -> String:
 		_brachistochrone_time(distance, OriginShift.dv_length(_vel_rel))
 	)
 	return "AUTO → %s   %s   ETA %s   ×%.0f" % [
-		target.def.display_name,
+		target.nav_display_name(),
 		_format_distance(distance),
 		_format_clock(eta),
 		SimClock.warp,

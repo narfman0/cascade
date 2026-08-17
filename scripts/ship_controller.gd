@@ -63,7 +63,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("toggle_flight_assist"):
 		GameState.toggle_flight_assist()
 	if event.is_action_pressed("interact") and GameState.input_mode == GameState.InputMode.SHIP_FLIGHT:
-		if character and character.has_method("request_exit"):
+		# Interact priority while docked: undock beats EVA-exit.
+		if GameState.docked:
+			var dc := get_node_or_null("DockingComputer") as DockingComputer
+			if dc:
+				dc.undock()
+		elif character and character.has_method("request_exit"):
 			character.request_exit()
 	if event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -73,7 +78,13 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if GameState.input_mode != GameState.InputMode.SHIP_FLIGHT or GameState.autopilot_active:
+	# Docked counts as hands-off: the hull is frozen at the port and thrust
+	# would fight the freeze anyway.
+	if (
+		GameState.input_mode != GameState.InputMode.SHIP_FLIGHT
+		or GameState.autopilot_active
+		or GameState.docked
+	):
 		_mouse_delta_accum = Vector2.ZERO
 		return
 
@@ -162,6 +173,13 @@ func spend_fuel(amount: float) -> void:
 	if amount <= 0.0:
 		return
 	fuel_remaining = maxf(0.0, fuel_remaining - amount)
+	fuel_changed.emit(fuel_remaining, fuel_capacity)
+
+
+## Top the tank up. Station services while docked — instant for now, same as
+## the EVA refill on boarding.
+func refill_fuel() -> void:
+	fuel_remaining = fuel_capacity
 	fuel_changed.emit(fuel_remaining, fuel_capacity)
 
 

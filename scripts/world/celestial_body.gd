@@ -1,4 +1,4 @@
-extends Node3D
+extends NavTarget
 class_name CelestialBody
 ## One planet, moon, or star. Builds its own visuals from a BodyDef.
 ##
@@ -24,9 +24,6 @@ const ORBIT_INFLUENCE_FRACTION: float = 0.4
 
 var def: BodyDef
 var parent_body: CelestialBody = null
-
-## True-space position, refreshed once per frame by SolarSystem.
-var true_pos: Array = [0.0, 0.0, 0.0]
 
 ## Metres from the render origin to this body's centre, in true space.
 var true_distance: float = 0.0
@@ -109,16 +106,10 @@ func position_at(t: float) -> Array:
 	var base: Array = [0.0, 0.0, 0.0]
 	if parent_body != null:
 		base = parent_body.position_at(t)
-	if def.orbit_radius <= 0.0:
-		return base
-	var w: float = TAU / maxf(def.orbit_period, 0.001)
-	var a: float = def.orbit_phase + w * t
-	var x: float = cos(a) * def.orbit_radius
-	var z_flat: float = sin(a) * def.orbit_radius
-	# Tilt the orbital plane about the X axis.
-	var y: float = sin(def.inclination) * z_flat
-	var z: float = cos(def.inclination) * z_flat
-	return [base[0] + x, base[1] + y, base[2] + z]
+	var off: Array = OrbitMath.offset_at(
+		t, def.orbit_radius, def.orbit_period, def.orbit_phase, def.inclination
+	)
+	return [base[0] + off[0], base[1] + off[1], base[2] + off[2]]
 
 
 ## True-space velocity at simulation time `t`, in m/s. Used by the autopilot to
@@ -127,15 +118,10 @@ func velocity_at(t: float) -> Array:
 	var base: Array = [0.0, 0.0, 0.0]
 	if parent_body != null:
 		base = parent_body.velocity_at(t)
-	if def.orbit_radius <= 0.0:
-		return base
-	var w: float = TAU / maxf(def.orbit_period, 0.001)
-	var a: float = def.orbit_phase + w * t
-	var dx: float = -sin(a) * def.orbit_radius * w
-	var dz_flat: float = cos(a) * def.orbit_radius * w
-	var dy: float = sin(def.inclination) * dz_flat
-	var dz: float = cos(def.inclination) * dz_flat
-	return [base[0] + dx, base[1] + dy, base[2] + dz]
+	var off: Array = OrbitMath.velocity_offset_at(
+		t, def.orbit_radius, def.orbit_period, def.orbit_phase, def.inclination
+	)
+	return [base[0] + off[0], base[1] + off[1], base[2] + off[2]]
 
 
 ## --- Rendering ---------------------------------------------------------------
@@ -194,3 +180,26 @@ func influence_radius() -> float:
 	if def.orbit_radius > 0.0:
 		r = minf(r, def.orbit_radius * ORBIT_INFLUENCE_FRACTION)
 	return r
+
+
+## Depth in the orbital hierarchy (Sun 0, Earth 1, Moon 2). The chain is at most
+## a few links, so walking it beats caching it somewhere that can go stale.
+func frame_depth() -> int:
+	var d: int = 0
+	var walk: CelestialBody = self
+	while walk.parent_body != null:
+		d += 1
+		walk = walk.parent_body
+	return d
+
+
+func nav_display_name() -> String:
+	return def.display_name
+
+
+func nav_note() -> String:
+	return def.nav_note
+
+
+func is_nav_destination() -> bool:
+	return def.is_destination

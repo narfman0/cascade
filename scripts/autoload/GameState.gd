@@ -10,6 +10,7 @@ enum InputMode { SHIP_FLIGHT, EVA, INTERIOR, FOCUSED }
 signal flight_assist_changed(enabled: bool)
 signal input_mode_changed(mode: InputMode)
 signal autopilot_active_changed(active: bool)
+signal docked_changed(is_docked: bool)
 
 var flight_assist_enabled: bool = true:
 	set(value):
@@ -34,6 +35,17 @@ var autopilot_active: bool = false:
 			return
 		autopilot_active = value
 		autopilot_active_changed.emit(autopilot_active)
+
+
+## True while the ship is soft-captured at a docking port. Flight controls and
+## the autopilot stand down; `interact` means undock. Set only by
+## DockingComputer, which owns the capture/release sequencing.
+var docked: bool = false:
+	set(value):
+		if value == docked:
+			return
+		docked = value
+		docked_changed.emit(docked)
 
 
 func toggle_flight_assist() -> void:

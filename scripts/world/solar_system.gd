@@ -18,8 +18,11 @@ signal system_built
 
 var bodies: Array[CelestialBody] = []
 
+## Registered OrbitalStations. Not built here — stations are authored scenes,
+## instanced by GameWorld and handed over via register_station().
+var stations: Array[OrbitalStation] = []
+
 var _by_id: Dictionary = {}
-var _depth: Dictionary = {}
 var _sun_light: DirectionalLight3D
 var _sun: CelestialBody
 
@@ -41,24 +44,18 @@ func refresh() -> void:
 
 
 func _build() -> void:
-	for def in SolarSystemData.build():
+	var defs: Array[BodyDef] = SolarSystemData.build()
+	for def in defs:
 		var body := CelestialBody.new()
 		body.setup(def)
 		add_child(body)
 		bodies.append(body)
 		_by_id[def.id] = body
 
-	# Resolve parents, then cache orbital depth for reference-frame selection.
-	for body in bodies:
-		if body.def.parent_id != &"":
-			body.parent_body = _by_id.get(body.def.parent_id) as CelestialBody
-	for body in bodies:
-		var d: int = 0
-		var walk: CelestialBody = body
-		while walk.parent_body != null:
-			d += 1
-			walk = walk.parent_body
-		_depth[body.def.id] = d
+	# Resolve parents; frame depth is derived from this chain on demand.
+	for i in bodies.size():
+		if defs[i].parent_id != &"":
+			bodies[i].parent_body = _by_id.get(defs[i].parent_id) as CelestialBody
 
 	_sun = _by_id.get(&"sun") as CelestialBody
 
@@ -89,6 +86,8 @@ func _update_bodies() -> void:
 	var t: float = SimClock.sim_time
 	for body in bodies:
 		body.update_render(t)
+	for station in stations:
+		station.update_render(t)
 	_aim_sun_light()
 
 
@@ -116,33 +115,50 @@ func get_body(id: StringName) -> CelestialBody:
 	return _by_id.get(id) as CelestialBody
 
 
-## Bodies the nav console offers as autopilot destinations.
-func destinations() -> Array[CelestialBody]:
-	var out: Array[CelestialBody] = []
+## Hand an authored station over to the system: resolve its parent body, include
+## it in destinations and reference frames, and drive its render position from
+## here on. Call after the render origin exists (GameWorld._wire_systems), never
+## from a `_ready` — children run before parents.
+func register_station(station: OrbitalStation) -> void:
+	station.setup(self)
+	stations.append(station)
+	station.update_render(SimClock.sim_time)
+
+
+## Targets the nav console offers as autopilot destinations.
+func destinations() -> Array[NavTarget]:
+	var out: Array[NavTarget] = []
 	for body in bodies:
-		if body.def.is_destination:
+		if body.is_nav_destination():
 			out.append(body)
+	for station in stations:
+		if station.is_nav_destination():
+			out.append(station)
 	return out
 
 
-## The body whose reference frame a true-space point sits in — the deepest body
+## The target whose reference frame a true-space point sits in — the deepest one
 ## in the hierarchy whose influence sphere contains the point. Returns null out
 ## in open space between bodies.
-func reference_body(true_pos: Array) -> CelestialBody:
-	var best: CelestialBody = null
+func reference_body(true_pos: Array) -> NavTarget:
+	var best: NavTarget = null
 	var best_depth: int = -1
 	var best_dist: float = INF
-	for body in bodies:
-		var dx: float = true_pos[0] - body.true_pos[0]
-		var dy: float = true_pos[1] - body.true_pos[1]
-		var dz: float = true_pos[2] - body.true_pos[2]
+	var candidates: Array[NavTarget] = []
+	candidates.append_array(bodies)
+	candidates.append_array(stations)
+	for target in candidates:
+		var dx: float = true_pos[0] - target.true_pos[0]
+		var dy: float = true_pos[1] - target.true_pos[1]
+		var dz: float = true_pos[2] - target.true_pos[2]
 		var dist: float = sqrt(dx * dx + dy * dy + dz * dz)
-		if dist > body.influence_radius():
+		if dist > target.influence_radius():
 			continue
-		var d: int = _depth.get(body.def.id, 0)
-		# Deeper wins: near the Moon you hold station on the Moon, not Earth.
+		var d: int = target.frame_depth()
+		# Deeper wins: near the Moon you hold station on the Moon, not Earth —
+		# and inside a station's influence, on the station, not its planet.
 		if d > best_depth or (d == best_depth and dist < best_dist):
-			best = body
+			best = target
 			best_depth = d
 			best_dist = dist
 	return best
@@ -152,8 +168,8 @@ func reference_body(true_pos: Array) -> CelestialBody:
 ## In open space that is zero (the system's inertial frame); near a body it is
 ## that body's orbital velocity, so parking next to it actually parks.
 func reference_velocity(true_pos: Array) -> Vector3:
-	var body := reference_body(true_pos)
-	if body == null:
+	var target := reference_body(true_pos)
+	if target == null:
 		return Vector3.ZERO
-	var v: Array = body.velocity_at(SimClock.sim_time)
+	var v: Array = target.velocity_at(SimClock.sim_time)
 	return Vector3(float(v[0]), float(v[1]), float(v[2]))

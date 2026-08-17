@@ -52,6 +52,47 @@ text = "SHIP  0.0 m"
 modulate = Color(0.75, 0.8, 0.85, 1)
 visible = false
 
+[node name="DockPanel" type="VBoxContainer" parent="Root"]
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -280.0
+offset_top = 24.0
+offset_right = -24.0
+offset_bottom = 140.0
+theme_override_constants/separation = 6
+mouse_filter = 2
+visible = false
+
+[node name="DockTitle" type="Label" parent="Root/DockPanel"]
+text = "APPROACH"
+modulate = Color(0.72, 0.78, 0.8, 1)
+
+[node name="DockDistance" type="Label" parent="Root/DockPanel"]
+text = "PORT    0.0 m"
+modulate = Color(0.7, 0.75, 0.78, 1)
+
+[node name="DockSpeed" type="Label" parent="Root/DockPanel"]
+text = "REL     0.00 m/s"
+modulate = Color(0.7, 0.75, 0.78, 1)
+
+[node name="DockAxis" type="Label" parent="Root/DockPanel"]
+text = "AXIS    0.0°"
+modulate = Color(0.7, 0.75, 0.78, 1)
+
+[node name="DockedLabel" type="Label" parent="Root"]
+anchor_left = 0.5
+anchor_top = 0.11
+anchor_right = 0.5
+anchor_bottom = 0.11
+offset_left = -240.0
+offset_top = -12.0
+offset_right = 240.0
+offset_bottom = 12.0
+text = ""
+horizontal_alignment = 1
+modulate = Color(0.68, 0.86, 0.78, 1)
+visible = false
+
 [node name="InteractPrompt" type="Label" parent="Root"]
 anchor_left = 0.5
 anchor_top = 0.85

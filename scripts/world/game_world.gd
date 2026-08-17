@@ -93,6 +93,12 @@ func _wire_systems() -> void:
 	if autopilot:
 		autopilot.setup(_system)
 
+	# Stations register after the origin exists — registration places them, so
+	# doing it from a station's own _ready would race the bootstrap.
+	var station := get_node_or_null("MeridianRelay") as OrbitalStation
+	if station:
+		_system.register_station(station)
+
 	if _debris_anchor:
 		# Park the field around the spawn point, not at an arbitrary altitude.
 		_debris_anchor.body_id = spawn_body_id

@@ -229,10 +229,11 @@ Flight assist with a destination. The player opens the nav console, picks a body
 - **The cruise drive is not the manual main engine.** 20 m/s² would make precision debris work unflyable by hand, so the computer gets a high-impulse drive it alone throttles and the pilot keeps the 4 m/s² main.
 - **Any stick input cancels it.** Discoverable, and it means a player never hunts for a disengage key.
 
-## Stations and Docking (designed, not built — owner-directed 2026-08-17)
+## Stations and Docking (built — Track SD1/SD2 complete)
 
 Dockable orbital stations, and eventually other ships. Design constraints and
-decisions, recorded before implementation:
+decisions (all now implemented; first station is "Meridian Relay",
+`scenes/stations/meridian_relay.tscn`, Earth orbit at 9 km):
 
 **Stations ride the same analytic rails as moons.** An `OrbitalStation` is a
 scene (POLYGON station modules — see docs/assets.md §4.5) attached to a
@@ -264,6 +265,19 @@ host stays live, same pattern as the stowed EVA suit). Undock reverses it with
 a small push-off impulse. Docked is an input-mode-adjacent state: flight
 controls stand down, `interact` context becomes the station (contract board,
 repairs — Phase 4/5 content hangs here).
+
+*Implementation caveat learned the hard way:* freezing is **not** enough for a
+docked ship under a rail-driven parent. The physics server writes a frozen
+kinematic body's global transform back to the node every physics step, one
+frame behind the moving parent, so the ship's local offset under the port
+drifts without bound. On capture the ship's body is therefore removed from the
+physics space entirely (`PhysicsServer3D.body_set_space(rid, RID())`, after
+the reparent) — the tree alone owns the transform, exactly like the stowed
+suit leaves the tree. Re-entering the world on undock re-adds the body to the
+space. The ship's CargoBay Area3D is a separate physics object and keeps
+working for EVA boarding while docked. `DockingComputer` (node on the Ship,
+like Autopilot) owns the whole sequence and also keeps the frozen hull's
+`linear_velocity` tracking the station so EVA exit inherits the right frame.
 
 **Manual first, assisted second.** Docking is flown by hand with flight assist
 in station frame — that is the skill loop, and the tone. The guided-burn

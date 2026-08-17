@@ -21,7 +21,7 @@ var _autopilot: Autopilot
 var _panel: PanelContainer
 var _rows: VBoxContainer
 var _footer: Label
-var _destinations: Array[CelestialBody] = []
+var _destinations: Array[NavTarget] = []
 var _selected: int = 0
 var _row_labels: Array[Label] = []
 var _refresh_accum: float = 0.0
@@ -159,9 +159,9 @@ func _refresh_rows() -> void:
 		var real_seconds: float = est.get("real_seconds", 0.0)
 		var label := _row_labels[i]
 		var marker: String = "▸" if i == _selected else " "
-		label.text = "%s %-10s %10s   %s" % [
+		label.text = "%s %-14s %10s   %s" % [
 			marker,
-			body.def.display_name,
+			body.nav_display_name(),
 			_format_distance(distance),
 			_format_clock(real_seconds),
 		]
@@ -169,7 +169,7 @@ func _refresh_rows() -> void:
 
 	if _destinations.is_empty():
 		return
-	var note: String = _destinations[_selected].def.nav_note
+	var note: String = _destinations[_selected].nav_note()
 	_footer.text = note if note != "" else "↑↓ select    ENTER engage    M / ESC close"
 
 

@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://c3sd2gatedck1t"]
+
+[ext_resource type="Script" path="res://tests/docking_test.gd" id="1_test"]
+
+[node name="DockingTest" type="Node"]
+script = ExtResource("1_test")

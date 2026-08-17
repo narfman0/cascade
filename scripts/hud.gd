@@ -14,14 +14,25 @@ extends CanvasLayer
 @onready var _autopilot_label: Label = $Root/AutopilotLabel
 @onready var _nav_hint: Label = $Root/NavHint
 @onready var _interact_prompt: Label = $Root/InteractPrompt
+@onready var _dock_panel: Control = $Root/DockPanel
+@onready var _dock_distance: Label = $Root/DockPanel/DockDistance
+@onready var _dock_speed: Label = $Root/DockPanel/DockSpeed
+@onready var _dock_axis: Label = $Root/DockPanel/DockAxis
+@onready var _docked_label: Label = $Root/DockedLabel
 @onready var _prograde_marker: Control = $Root/PrograteMarker
 @onready var _prograde_dot: ColorRect = $Root/PrograteMarker/Dot
+
+## Modulates for the approach readout: a line flips to the settled tint when its
+## value is inside capture tolerance. Calm per tone — no red anywhere.
+const DOCK_LINE_DIM := Color(0.7, 0.75, 0.78)
+const DOCK_LINE_OK := Color(0.68, 0.9, 0.78)
 
 var _ship: RigidBody3D
 var _character: RigidBody3D
 var _system: SolarSystem
 var _autopilot: Autopilot
 var _nav_console: NavConsole
+var _docking: DockingComputer
 
 
 func _ready() -> void:
@@ -34,6 +45,7 @@ func _ready() -> void:
 		_character = _ship.get("character") as RigidBody3D
 		if _character == null:
 			_character = _ship.get_node_or_null("Character") as RigidBody3D
+		_docking = _ship.get_node_or_null("DockingComputer") as DockingComputer
 	GameState.flight_assist_changed.connect(_on_flight_assist_changed)
 	GameState.input_mode_changed.connect(_on_input_mode_changed)
 	_on_flight_assist_changed(GameState.flight_assist_enabled)
@@ -83,6 +95,7 @@ func _process(_delta: float) -> void:
 
 	_update_reference_readout()
 	_update_autopilot_readout()
+	_update_docking_readout()
 
 	if GameState.input_mode == GameState.InputMode.EVA:
 		_update_eva_readouts()
@@ -100,7 +113,7 @@ func _update_reference_readout() -> void:
 	if _system == null or _ship == null:
 		return
 	var body := _system.reference_body(OriginShift.to_true(_ship.global_position))
-	_reference_label.text = "REF   %s" % (body.def.display_name if body else "open space")
+	_reference_label.text = "REF   %s" % (body.nav_display_name() if body else "open space")
 
 
 func _update_autopilot_readout() -> void:
@@ -142,7 +155,38 @@ func _update_eva_readouts() -> void:
 	_interact_prompt.visible = can_board
 
 
+func _update_docking_readout() -> void:
+	if _docking == null:
+		return
+	if GameState.docked:
+		_dock_panel.visible = false
+		_docked_label.visible = true
+		_docked_label.text = "DOCKED — %s" % _docking.docked_station_name()
+		return
+	_docked_label.visible = false
+	var port: DockingPort = _docking.approach_port
+	_dock_panel.visible = port != null
+	if port == null:
+		return
+	_dock_distance.text = "PORT  %6.1f m" % _docking.approach_distance
+	_dock_speed.text = "REL   %6.2f m/s" % _docking.approach_speed
+	_dock_axis.text = "AXIS  %6.1f°" % _docking.approach_axis_error_deg
+	_dock_speed.modulate = (
+		DOCK_LINE_OK if _docking.approach_speed <= port.capture_speed_max else DOCK_LINE_DIM
+	)
+	_dock_axis.modulate = (
+		DOCK_LINE_OK
+		if _docking.approach_axis_error_deg <= port.capture_angle_max_deg
+		else DOCK_LINE_DIM
+	)
+
+
 func _update_interact_prompt_ship() -> void:
+	# Interact priority while docked: undock beats EVA-exit.
+	if GameState.docked and GameState.input_mode == GameState.InputMode.SHIP_FLIGHT:
+		_interact_prompt.text = "F — Undock"
+		_interact_prompt.visible = true
+		return
 	# Available from the cockpit whenever the pilot is actually flying.
 	var flying: bool = (
 		GameState.input_mode == GameState.InputMode.SHIP_FLIGHT

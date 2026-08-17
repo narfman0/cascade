@@ -1,0 +1,103 @@
+[gd_scene load_steps=14 format=3 uid="uid://dnq7v2mer1s5k"]
+
+[ext_resource type="Script" path="res://scripts/world/orbital_station.gd" id="1_station"]
+[ext_resource type="Script" path="res://scripts/world/station_def.gd" id="2_def"]
+[ext_resource type="Script" path="res://scripts/docking_port.gd" id="3_port"]
+[ext_resource type="PackedScene" uid="uid://cmc6v4ylhp1sd" path="res://assets/meshes/POLYGON_Scifi_Space_SourceFiles_v2/SourceFiles/FBX/SM_Ship_Station_06.gltf" id="4_hull"]
+
+[sub_resource type="Resource" id="StationDef_meridian"]
+script = ExtResource("2_def")
+id = &"meridian_relay"
+display_name = "Meridian Relay"
+parent_id = &"earth"
+orbit_radius = 9000.0
+orbit_period = 2200.0
+orbit_phase = 2.0
+inclination = 0.06
+nav_note = "Relay platform, Earth orbit. Port on the equatorial face."
+standoff = 200.0
+influence = 2000.0
+
+[sub_resource type="BoxShape3D" id="BoxShape_foot"]
+size = Vector3(61, 12, 53)
+
+[sub_resource type="BoxShape3D" id="BoxShape_tower"]
+size = Vector3(56, 50, 44)
+
+[sub_resource type="BoxShape3D" id="BoxShape_mast"]
+size = Vector3(5, 40, 4)
+
+[sub_resource type="BoxShape3D" id="BoxShape_capture"]
+size = Vector3(6, 6, 10)
+
+[sub_resource type="StandardMaterial3D" id="Material_portlight"]
+albedo_color = Color(0.5, 0.85, 0.7, 1)
+emission_enabled = true
+emission = Color(0.45, 0.95, 0.7, 1)
+emission_energy_multiplier = 4.0
+
+[sub_resource type="StandardMaterial3D" id="Material_mastlight"]
+albedo_color = Color(0.9, 0.55, 0.4, 1)
+emission_enabled = true
+emission = Color(1, 0.5, 0.35, 1)
+emission_energy_multiplier = 4.0
+
+[sub_resource type="TorusMesh" id="TorusMesh_collar"]
+inner_radius = 2.2
+outer_radius = 3.0
+rings = 24
+
+[sub_resource type="SphereMesh" id="SphereMesh_mastlight"]
+radius = 0.4
+height = 0.8
+radial_segments = 12
+rings = 6
+
+[node name="MeridianRelay" type="Node3D"]
+script = ExtResource("1_station")
+def = SubResource("StationDef_meridian")
+
+[node name="Hull" parent="." instance=ExtResource("4_hull")]
+
+[node name="Structure" type="StaticBody3D" parent="."]
+collision_layer = 8
+collision_mask = 0
+
+[node name="ShapeFoot" type="CollisionShape3D" parent="Structure"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 6, 0)
+shape = SubResource("BoxShape_foot")
+
+[node name="ShapeTower" type="CollisionShape3D" parent="Structure"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 37, 0)
+shape = SubResource("BoxShape_tower")
+
+[node name="ShapeMast" type="CollisionShape3D" parent="Structure"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 82, 0)
+shape = SubResource("BoxShape_mast")
+
+[node name="DockingPort" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 35, 23)
+script = ExtResource("3_port")
+
+[node name="CaptureVolume" type="Area3D" parent="DockingPort"]
+collision_layer = 0
+collision_mask = 1
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DockingPort/CaptureVolume"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 5)
+shape = SubResource("BoxShape_capture")
+
+[node name="Collar" type="MeshInstance3D" parent="DockingPort"]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, -0.6)
+mesh = SubResource("TorusMesh_collar")
+surface_material_override/0 = SubResource("Material_portlight")
+
+[node name="NavLightMast" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 101.5, 0)
+mesh = SubResource("SphereMesh_mastlight")
+surface_material_override/0 = SubResource("Material_mastlight")
+
+[node name="NavLightFoot" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 29, 2, 0)
+mesh = SubResource("SphereMesh_mastlight")
+surface_material_override/0 = SubResource("Material_mastlight")
