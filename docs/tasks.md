@@ -162,6 +162,20 @@ Still needs a human at a keyboard — no assertion captures these:
 
 ---
 
+## Track PR — Progressive Planet Renderer (designed, not started)
+
+Design: `docs/planet-renderer.md` — read it first; it resolves the scale
+stylization, the three render regimes, and the integration contract with the
+proxy clamp. Owner-directed track; independent of the M3 gate.
+
+- [ ] **PR1 — Relief everywhere + night lights**: `BodySurface` resource, cube-sphere root patches, procedural per-body height (seeded FastNoiseLite), baked albedo/normal/emissive, planet spin (`spin_period` on BodyDef), terminator-masked city-light emissive, proxy integration. Every nav destination stops being a smooth ball.
+- [ ] **PR2 — Progressive refinement**: quadtree + screen-space-error metric, skirts, WorkerThreadPool generation, LRU patch cache, `tests/planet_test.gd` (seams, determinism, budgets, streaming hysteresis).
+- [ ] **PR3 — Detail sites + NYC pilot**: `DetailSite` resource + streaming, inset heightmap blending, authored Earth/Moon/Mars maps cooked onto the asset server (`CASCADE_Planets` raw drop — public-domain NASA data), Manhattan diorama from POLYGON city packs (`SM_Bld_Background_*`), night street-grid emissive.
+- [ ] **PR4 (stretch)**: atmosphere rim shell, clouds, geomorphing, more sites.
+
+Open questions for owner (full context in the design doc): green-light the
+real-Earth map drop; site list beyond NYC; whether relief ever needs collision.
+
 ## Milestone 3 — Debris capture + contracts (DO NOT START)
 
 Gated on M1 + M2 verification and owner sign-off on movement feel. Not yet broken down. Headline scope from plan.md Phase 2/3: physics-active debris, Grapple Arm `Tool` Resource + RotationMatch minigame, tether joint, CargoBay stow, first contract via `ContractManager`.

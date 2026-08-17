@@ -216,6 +216,7 @@ Each minigame is a standalone `Control` scene instantiated into the HUD's `ToolM
 - **Reference frames:** `reference_body()` returns the deepest body whose influence sphere contains a point; `reference_velocity()` returns that body's orbital velocity. Flight assist nulls velocity *relative to that frame*, so parking beside a moving moon actually parks. Influence never exceeds a fraction of a body's own orbit radius — otherwise the Moon's frame would swallow low Earth orbit.
 - **Orbital anchors:** `OrbitalAnchor` pins authored content (a debris field) to a body's frame, recomputing from true space each frame. Debris in low Earth orbit must travel with Earth or it is kilometres behind within a minute.
 - **Sky:** procedural starfield shader (`assets/shaders/starfield.gdshader`). Written rather than textured because the asset server has no orbital sky — see docs/assets.md.
+- **Surfaces:** bodies are currently flat-shaded spheres. The progressive planet renderer (relief on every body, authored detail sites like NYC, city lights on the dark side) is designed in `docs/planet-renderer.md` — read that before touching `CelestialBody` visuals; it constrains how the proxy clamp and any future LOD interact.
 
 ## Travel and the Autopilot
 
