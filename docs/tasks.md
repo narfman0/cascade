@@ -76,6 +76,30 @@ Read `docs/architecture.md` before starting. Scene tree, physics approach, and a
   - FA indicator: clear on/off state, updates via `GameState` signal.
 - [ ] Calm visual language per narrative.md — thin lines, muted color, no red alerts.
 
+### M1.6 Solar system + travel (added at owner request)
+- [x] `SimClock` autoload — simulation time and time compression, registered in project.godot
+- [x] `OriginShift` implemented for real: 64-bit true space, `origin_shiftable` group, bootstrap `initialize_origin` vs runtime `shift_to`
+- [x] `SolarSystemData` / `BodyDef` / `CelestialBody` / `SolarSystem` — 15 bodies (Sun, 8 planets, 6 moons), analytic circular orbits, far-field angular-size-preserving proxy rendering, one system light re-aimed from the Sun each frame
+- [x] Reference frames: flight assist holds station against the nearby body, not the Sun; HUD shows the active frame
+- [x] `OrbitalAnchor` — debris field travels with its parent body
+- [x] `Autopilot` — brachistochrone transfers to any body, closed-loop guidance onto a moving target, midpoint flip, velocity-matched standoff park, adaptive time compression bounded to ≤300 s real
+- [x] `NavConsole` — destination list with live distance/ETA, `FOCUSED` input mode, M to open, Enter to engage; any stick input cancels a transfer
+- [x] Procedural starfield sky shader (the asset server has no orbital sky — see docs/assets.md)
+- [x] Synty hull mesh integrated; collision matched to the measured AABB
+- [x] `tests/travel_test.gd` — headless verification: spawn, orbits, analytic velocity, and a transfer to all 14 destinations
+- [x] `tests/capture_shots.gd` — screenshot harness (runs under xvfb)
+
+Fixed on the way through, worth knowing:
+- A `RigidBody3D` nested under another `RigidBody3D` corrupts both transforms. The EVA suit is now stowed out of the tree while aboard. See architecture.md.
+- `SolarSystem` must not place bodies in `_ready`: children run before parents, so the origin does not exist yet, and the Sun's collision sphere ends up enabled on top of the spawn point.
+- The physics server reverts transform writes to a live `RigidBody3D` — steer only while frozen.
+
+Remaining in this area (not blocking M2):
+- [ ] Per-body debris fields / arrival content (currently one field at the spawn body; M3 scope)
+- [ ] Cruise visual treatment — no sense of speed during a compressed transfer beyond the HUD
+- [ ] Nav console does not yet offer a "return to previous location" or arbitrary waypoints
+- [ ] Bodies are untextured procedural spheres; art-family decision in docs/assets.md §5 is still open
+
 ### M1 VERIFICATION GATE — must pass before starting M2
 - [ ] Momentum conservation: thrust to ~20 m/s, cut input, coast ≥60 s with zero velocity change; same for rotation (constant tumble persists).
 - [ ] FA-off is challenging but controllable; a deliberate player can null a tumble manually.

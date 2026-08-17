@@ -1,0 +1,169 @@
+[gd_scene load_steps=17 format=3 uid="uid://dgm3p8jkq2n7f"]
+
+[ext_resource type="PackedScene" uid="uid://b7x2n4kq8ma1p" path="res://scenes/ship.tscn" id="1_ship"]
+[ext_resource type="PackedScene" uid="uid://c8h4mn2p9r7ax" path="res://scenes/hud.tscn" id="2_hud"]
+[ext_resource type="Script" path="res://scripts/world/game_world.gd" id="3_world"]
+[ext_resource type="Script" path="res://scripts/world/solar_system.gd" id="4_system"]
+[ext_resource type="Script" path="res://scripts/world/orbital_anchor.gd" id="5_anchor"]
+[ext_resource type="Shader" path="res://assets/shaders/starfield.gdshader" id="6_stars"]
+
+[sub_resource type="ShaderMaterial" id="Sky_mat"]
+shader = ExtResource("6_stars")
+shader_parameter/space_color = Color(0.0015, 0.0018, 0.0035, 1)
+shader_parameter/star_scale = 160.0
+shader_parameter/star_sparsity = 0.972
+shader_parameter/star_intensity = 2.2
+shader_parameter/faint_scale = 430.0
+shader_parameter/faint_sparsity = 0.988
+
+[sub_resource type="Sky" id="Sky_res"]
+sky_material = SubResource("Sky_mat")
+
+[sub_resource type="Environment" id="Environment_res"]
+background_mode = 2
+sky = SubResource("Sky_res")
+ambient_light_source = 2
+ambient_light_color = Color(0.1, 0.12, 0.17, 1)
+ambient_light_energy = 1.1
+tonemap_mode = 3
+tonemap_exposure = 1.0
+tonemap_white = 4.0
+glow_enabled = true
+glow_intensity = 0.4
+glow_strength = 0.9
+glow_bloom = 0.05
+
+[sub_resource type="BoxMesh" id="BoxMesh_debris_a"]
+size = Vector3(3, 2, 5)
+
+[sub_resource type="StandardMaterial3D" id="Material_debris"]
+albedo_color = Color(0.45, 0.42, 0.38, 1)
+metallic = 0.4
+roughness = 0.75
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_debris"]
+top_radius = 1.2
+bottom_radius = 1.2
+height = 4.0
+
+[sub_resource type="BoxShape3D" id="BoxShape_debris_a"]
+size = Vector3(3, 2, 5)
+
+[sub_resource type="CylinderShape3D" id="CylinderShape_debris"]
+height = 4.0
+radius = 1.2
+
+[node name="GameWorld" type="Node3D"]
+script = ExtResource("3_world")
+
+[node name="SolarSystem" type="Node3D" parent="."]
+script = ExtResource("4_system")
+
+[node name="Environment" type="Node3D" parent="."]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="Environment"]
+environment = SubResource("Environment_res")
+
+[node name="DebrisField" type="Node3D" parent="."]
+script = ExtResource("5_anchor")
+
+[node name="Debris_001" type="StaticBody3D" parent="DebrisField"]
+transform = Transform3D(0.87, 0.5, 0, -0.5, 0.87, 0, 0, 0, 1, 80, 12, -60)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Mesh" type="MeshInstance3D" parent="DebrisField/Debris_001"]
+mesh = SubResource("BoxMesh_debris_a")
+surface_material_override/0 = SubResource("Material_debris")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DebrisField/Debris_001"]
+shape = SubResource("BoxShape_debris_a")
+
+[node name="Debris_002" type="StaticBody3D" parent="DebrisField"]
+transform = Transform3D(0.7, 0, 0.7, 0, 1.4, 0, -0.7, 0, 0.7, -120, -30, 40)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Mesh" type="MeshInstance3D" parent="DebrisField/Debris_002"]
+mesh = SubResource("CylinderMesh_debris")
+surface_material_override/0 = SubResource("Material_debris")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DebrisField/Debris_002"]
+shape = SubResource("CylinderShape_debris")
+
+[node name="Debris_003" type="StaticBody3D" parent="DebrisField"]
+transform = Transform3D(1.2, 0, 0, 0, 1.2, 0, 0, 0, 1.2, 210, 40, 180)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Mesh" type="MeshInstance3D" parent="DebrisField/Debris_003"]
+mesh = SubResource("BoxMesh_debris_a")
+surface_material_override/0 = SubResource("Material_debris")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DebrisField/Debris_003"]
+shape = SubResource("BoxShape_debris_a")
+
+[node name="Debris_004" type="StaticBody3D" parent="DebrisField"]
+transform = Transform3D(0.6, 0.6, 0, -0.6, 0.6, 0, 0, 0, 1.5, -80, 60, -180)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Mesh" type="MeshInstance3D" parent="DebrisField/Debris_004"]
+mesh = SubResource("CylinderMesh_debris")
+surface_material_override/0 = SubResource("Material_debris")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DebrisField/Debris_004"]
+shape = SubResource("CylinderShape_debris")
+
+[node name="Debris_005" type="StaticBody3D" parent="DebrisField"]
+transform = Transform3D(1, 0, 0, 0, 0.5, 0.87, 0, -0.87, 0.5, 60, -60, 240)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Mesh" type="MeshInstance3D" parent="DebrisField/Debris_005"]
+mesh = SubResource("BoxMesh_debris_a")
+surface_material_override/0 = SubResource("Material_debris")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DebrisField/Debris_005"]
+shape = SubResource("BoxShape_debris_a")
+
+[node name="Debris_006" type="StaticBody3D" parent="DebrisField"]
+transform = Transform3D(2, 0, 0, 0, 0.8, 0, 0, 0, 0.8, -300, 20, 90)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Mesh" type="MeshInstance3D" parent="DebrisField/Debris_006"]
+mesh = SubResource("BoxMesh_debris_a")
+surface_material_override/0 = SubResource("Material_debris")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DebrisField/Debris_006"]
+shape = SubResource("BoxShape_debris_a")
+
+[node name="Debris_007" type="StaticBody3D" parent="DebrisField"]
+transform = Transform3D(0.9, 0, 0, 0, 0.9, 0, 0, 0, 2.5, 150, -80, -120)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Mesh" type="MeshInstance3D" parent="DebrisField/Debris_007"]
+mesh = SubResource("CylinderMesh_debris")
+surface_material_override/0 = SubResource("Material_debris")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DebrisField/Debris_007"]
+shape = SubResource("CylinderShape_debris")
+
+[node name="Debris_008" type="StaticBody3D" parent="DebrisField"]
+transform = Transform3D(0.7, 0, 0.7, 0, 1, 0, -0.7, 0, 0.7, -220, 10, -260)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Mesh" type="MeshInstance3D" parent="DebrisField/Debris_008"]
+mesh = SubResource("BoxMesh_debris_a")
+surface_material_override/0 = SubResource("Material_debris")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="DebrisField/Debris_008"]
+shape = SubResource("BoxShape_debris_a")
+
+[node name="Ship" parent="." instance=ExtResource("1_ship")]
+
+[node name="HUD" parent="." instance=ExtResource("2_hud")]
+ship_path = NodePath("../Ship")

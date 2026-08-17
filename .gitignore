@@ -1,0 +1,18 @@
+# Godot 4+ specific ignores
+.godot/
+.import/
+*.import
+export.cfg
+export_presets.cfg
+
+# Cooked Synty art comes from the asset server (see fetch_assets.sh and
+# docs/assets.md) — the server is the source of truth, never commit the binaries.
+assets/meshes/
+
+# System / IDE
+.DS_Store
+*.swp
+*.tmp
+*.log
+.idea/
+.vscode/
