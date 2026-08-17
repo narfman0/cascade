@@ -3,16 +3,17 @@ extends Node
 ##
 ## Run: xvfb-run -a godot res://tests/capture_planet_shots.tscn
 ##
-## Uses a harness-owned review camera rather than the gameplay rig: the shots
-## want a planet centred and framed, which is not where a camera parked behind
-## the ship happens to point. The ship is frozen and posed so the surface's error
-## metric (which reads the active camera) refines toward what is being framed.
+## Frames by posing the *ship* and letting the gameplay rig camera follow, rather
+## than by adding a harness camera. A separately-added Camera3D does not reliably
+## win `current` against the ship's rig here — that is what made the first pass of
+## these shots (and the EVA portraits before them) render from behind the ship
+## instead of from the intended framing. Posing the ship is also more honest: the
+## shots then show what the player would actually see.
 
 const OUT_DIR: String = "user://shots"
 
 var _system: SolarSystem
 var _ship: RigidBody3D
-var _cam: Camera3D
 
 
 func _ready() -> void:
@@ -26,13 +27,6 @@ func _ready() -> void:
 	_ship = world.get_node("Ship")
 	_ship.freeze = true
 	GameState.flight_assist_enabled = false
-
-	_cam = Camera3D.new()
-	_cam.fov = 55.0
-	_cam.near = 0.5
-	_cam.far = 200000.0
-	add_child(_cam)
-	_cam.current = true
 
 	var earth := _system.get_body(&"earth")
 
@@ -85,12 +79,9 @@ func _frame_body(body: CelestialBody, radii: float, sun_offset: float) -> void:
 	var dir: Vector3 = to_sun.rotated(axis.normalized(), sun_offset)
 	var where: Vector3 = centre + dir * (body.def.radius * radii)
 
-	_ship.freeze = true
-	for _i in 3:
-		_ship.global_position = where
-		await get_tree().physics_frame
-	_cam.global_position = where
-	_cam.look_at(centre, Vector3.UP)
+	# The rig sits behind the ship along its +Z, so back the ship off by the rig
+	# offset to keep the framing distance honest, then aim it at the body.
+	await _pose_ship(where + (where - centre).normalized() * 12.0, centre)
 	await _settle(body)
 
 
@@ -102,14 +93,9 @@ func _skim_frame(body: CelestialBody) -> void:
 	var up: Vector3 = to_sun
 	var along: Vector3 = up.cross(Vector3.UP).normalized()
 	var where: Vector3 = centre + up * (body.def.radius + 140.0)
-	_ship.freeze = true
-	for _i in 3:
-		_ship.global_position = where
-		await get_tree().physics_frame
-	_cam.global_position = where
 	# Look along the surface with a slight downward tilt, so terrain fills the
 	# lower frame and the limb sits high.
-	_cam.look_at(where + along * 400.0 - up * 90.0, up)
+	await _pose_ship(where, where + along * 400.0 - up * 90.0, up)
 	await _settle(body)
 
 
@@ -139,6 +125,24 @@ func _settle(body: CelestialBody) -> void:
 		else:
 			stable = 0
 		previous = now
+
+
+## Hold the ship at a pose across physics frames — a frozen kinematic body's
+## transform only commits through a physics step — and let the camera rig's
+## smoothing catch up so the shot is not taken mid-lerp.
+func _pose_ship(where: Vector3, look_target: Vector3, up: Vector3 = Vector3.UP) -> void:
+	_ship.freeze = true
+	var dir: Vector3 = look_target - where
+	if dir.length() < 1.0:
+		return
+	if absf(dir.normalized().dot(up)) > 0.99:
+		up = Vector3.RIGHT
+	for _i in 24:
+		_ship.global_position = where
+		_ship.look_at(look_target, up)
+		await get_tree().physics_frame
+	for _i in 20:
+		await get_tree().process_frame
 
 
 func _report(body: CelestialBody) -> void:

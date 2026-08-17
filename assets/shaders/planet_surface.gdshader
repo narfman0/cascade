@@ -53,7 +53,12 @@ void fragment() {
 		if (east_len > 1e-4) {
 			east_l /= east_len;
 			vec3 south_l = normalize(cross(sdir, east_l));
-			mat3 mv = mat3(MODELVIEW_MATRIX);
+			// MODELVIEW_MATRIX is a vertex-stage builtin in Godot 4 and does not
+			// exist in fragment(); referencing it fails compilation, which
+			// silently falls the whole surface back to the default grey
+			// material. VIEW_MATRIX * MODEL_MATRIX is the fragment-stage
+			// equivalent.
+			mat3 mv = mat3(VIEW_MATRIX * MODEL_MATRIX);
 			vec3 east_v = normalize(mv * east_l);
 			vec3 south_v = normalize(mv * south_l);
 			vec3 nm = texture(normal_tex, uv).rgb * 2.0 - 1.0;

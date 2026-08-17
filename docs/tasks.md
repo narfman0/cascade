@@ -217,32 +217,32 @@ budgets and verification plan live there; this is the build order.
   corners collapsing onto 8 cube corners, each shared by 3 faces) instead of
   guessing which patches border each other.
 
-**Still open before the PR1/PR2 gates close — the VISUAL gate is FAILING:**
+**PR1/PR2 visual gate: PASSING.** Screenshots 14–20 in `screenshots/`. Earth
+renders with continents, water, mountain relief and snow caps; city lights read
+along the terminator; the Moon shows cratered relief; refinement reaches depth 4
+in the harness with ~220 leaves resident.
 
-`tests/capture_planet_shots.gd` runs and writes all 11 shots, but the output is
-wrong and the gate does not pass. Do not treat PR1/PR2 as done. Two distinct
-problems, and they need separating before anything else in Track PR:
+Two defects found and fixed while closing this gate, both worth remembering:
 
-- [ ] **Surfaces render as flat grey facets, not textured planets.** Grey at
-  roughly 0.5 is the shader's `base_color` fallback, which points at the baked
-  albedo/normal/emissive not reaching the material at draw time — even though
-  `textures_ready` reports true and `_commit_bake` does call
-  `set_shader_parameter("textures_ok", true)`. The `planet_sun_direction` global
-  uniform *is* registered in project.godot, so that is not it. Check next: is
-  `_material` actually the patches' material (override vs surface_material), and
-  are patches built before the bake commit picking it up?
-- [ ] **The harness frames the wrong thing.** The review camera is set `current`,
-  but the shots look like geometry at close range from an unintended position, and
-  the harness reports `max_depth: 0` / `skim=false` even when posed 140 m above
-  the surface — so `_evaluate()` is reading a different camera than the one being
-  framed (the ship's rig camera, which lags a teleport by design). Refinement
-  itself is fine — planet_test measures depth 5 correctly — this is the harness.
-- [ ] Once both are fixed: Earth disc with continents/sea, terminator night
-  lights, Moon relief, Jupiter banding, 5-frame no-pop approach, low-skim frame.
+- **`MODELVIEW_MATRIX` does not exist in a Godot 4 `fragment()` shader** — it is
+  a vertex-stage builtin. Referencing it failed shader compilation, which
+  silently falls the whole surface back to the engine's default grey material;
+  that was the "flat grey facets". Worse, the compile error fired *inside*
+  `PlanetSurface.setup()`, which left the rest of surface init in a degenerate
+  state — that is why the harness also reported `max_depth: 0` and `skim=false`.
+  One symptom, two apparent bugs. `VIEW_MATRIX * MODEL_MATRIX` is the
+  fragment-stage equivalent.
+- **A harness-added Camera3D does not reliably win `current`** against the
+  ship's rig camera, so shots render from behind the ship instead of the intended
+  framing. This silently affected the EVA portraits too. Pose the *ship* and let
+  the gameplay rig camera follow — it is what the original `capture_shots.gd`
+  did, it works, and the shots then show what the player would actually see.
 
-The 31 analytic checks in `tests/planet_test.gd` all pass and cover geometry,
-determinism, seams, spin, budgets and the collision swap — so the *systems* are
-sound. What is unverified is that any of it looks like a planet.
+Remaining polish (not gate-blocking):
+- [ ] Earth's water reads as scattered lakes rather than oceans — `sea_level`
+  at -0.3 only floods the deepest basins. Real bathymetry in PR3 makes this a
+  data question rather than a tuning one, so it is best left until then.
+
 ### PR3 — Detail sites + NYC pilot (scope set by owner 2026-08-17)
 
 Owner direction: seed from NASA / open GIS data at **coarse granularity**, add
