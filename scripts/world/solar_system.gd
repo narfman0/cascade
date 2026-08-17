@@ -107,6 +107,9 @@ func _aim_sun_light() -> void:
 	if absf(dir.dot(up)) > 0.999:
 		up = Vector3.RIGHT
 	_sun_light.look_at_from_position(Vector3.ZERO, dir, up)
+	# The planet shader gates night lights on the same sun the light is aimed
+	# from: global parameter points from the render origin TOWARD the Sun.
+	RenderingServer.global_shader_parameter_set(&"planet_sun_direction", -dir)
 
 
 ## --- Queries -----------------------------------------------------------------

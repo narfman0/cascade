@@ -1,0 +1,177 @@
+class_name PlanetPatchMesh
+## Pure, deterministic cube-sphere patch geometry builder.
+##
+## A patch is a 33×33 vertex grid (32×32 quads) on one cube face, normalized to
+## the sphere and displaced by the body's height sampler, plus a skirt ring
+## dropped below the surface to hide cracks between neighbouring depths.
+## Vertices are stored RELATIVE TO THE PATCH CENTER: float32 stays exact at
+## patch scale, and the center is applied via the patch node's transform, which
+## the existing origin/proxy machinery already moves.
+##
+## Everything here is a static function of (surface, radius, face, depth, x, y)
+## with no other state — same inputs, bit-identical arrays, on any thread. That
+## is what makes the worker-pool build path and the determinism test honest.
+
+## Quads per patch side. 33×33 vertices.
+const GRID: int = 32
+
+
+## Map face-local (u, v) in [0,1]² to a unit sphere direction. Values outside
+## [0,1] are legal (the normal-sampling apron pokes past face edges) — the cube
+## point just extends beyond the face square and still normalizes cleanly.
+## Every face is oriented u-right / v-down as seen from outside the sphere, so
+## one triangle winding serves all six.
+static func face_dir(face: int, u: float, v: float) -> Vector3:
+	var a: float = 2.0 * u - 1.0
+	var b: float = 2.0 * v - 1.0
+	match face:
+		0:
+			return Vector3(1.0, -b, -a).normalized()
+		1:
+			return Vector3(-1.0, -b, a).normalized()
+		2:
+			return Vector3(a, 1.0, b).normalized()
+		3:
+			return Vector3(a, -1.0, -b).normalized()
+		4:
+			return Vector3(a, -b, 1.0).normalized()
+		_:
+			return Vector3(-a, -b, -1.0).normalized()
+
+
+static func patch_key(face: int, depth: int, x: int, y: int) -> String:
+	return "%d:%d:%d:%d" % [face, depth, x, y]
+
+
+## Arc length of one patch side, metres, at a given depth.
+static func span_m(radius: float, depth: int) -> float:
+	return radius * (PI / 2.0) / float(1 << depth)
+
+
+## Build the mesh arrays for one patch. Returns:
+##   verts / normals: PackedVector3Array (grid then 4 skirt rows)
+##   indices: PackedInt32Array (grid triangles first, then skirt triangles)
+##   grid_index_count: int — index count before skirts (collision uses only
+##     these: skirts point inward and would add useless triangles)
+##   center: Vector3 — undisplaced sphere point at patch center, patch-node
+##     local position under PlanetSurface
+static func build_arrays(
+	surface: BodySurface, radius: float, face: int, depth: int, x: int, y: int,
+	skirt_drop: float
+) -> Dictionary:
+	var sampler := surface.make_sampler()
+	var div: float = float(1 << depth)
+	var n: int = GRID + 1
+	var apron_n: int = n + 2
+
+	# Displaced positions over the grid plus a one-vertex apron on every side,
+	# so central-difference normals are computed from the same analytic height
+	# field on both sides of a patch edge — normals then agree across seams.
+	var apron: PackedVector3Array = PackedVector3Array()
+	apron.resize(apron_n * apron_n)
+	for jj in apron_n:
+		var v: float = (float(y) + float(jj - 1) / float(GRID)) / div
+		for ii in apron_n:
+			var u: float = (float(x) + float(ii - 1) / float(GRID)) / div
+			var dir := face_dir(face, u, v)
+			apron[jj * apron_n + ii] = dir * (radius * (1.0 + sampler.height(dir)))
+
+	var center: Vector3 = face_dir(
+		face, (float(x) + 0.5) / div, (float(y) + 0.5) / div
+	) * radius
+
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
+	verts.resize(n * n)
+	normals.resize(n * n)
+	for j in n:
+		for i in n:
+			var ai: int = (j + 1) * apron_n + (i + 1)
+			var p: Vector3 = apron[ai]
+			verts[j * n + i] = p - center
+			# cross(dv, du) points outward on every face (u-right, v-down).
+			var du: Vector3 = apron[ai + 1] - apron[ai - 1]
+			var dv: Vector3 = apron[ai + apron_n] - apron[ai - apron_n]
+			var nrm: Vector3 = dv.cross(du).normalized()
+			if nrm.dot(p) < 0.0:
+				nrm = -nrm
+			normals[j * n + i] = nrm
+
+	var indices := PackedInt32Array()
+	for j in GRID:
+		for i in GRID:
+			var i00: int = j * n + i
+			var i10: int = j * n + i + 1
+			var i01: int = (j + 1) * n + i
+			var i11: int = (j + 1) * n + i + 1
+			# Godot front faces wind clockwise as seen from outside.
+			indices.append(i00)
+			indices.append(i10)
+			indices.append(i01)
+			indices.append(i10)
+			indices.append(i11)
+			indices.append(i01)
+	var grid_index_count: int = indices.size()
+
+	# Skirts: each edge gets a duplicate row dropped radially below the surface.
+	# Treating the skirt row as one more (virtual) grid row beyond the edge lets
+	# the standard grid winding apply unchanged, so the walls face outward.
+	var drop: float = skirt_drop * span_m(radius, depth)
+	var edges: Array = [
+		# [start grid index, step, is outer row "before" the edge in grid order]
+		[0, 1, true],                    # top (j = 0), outer row is j = -1
+		[(n - 1) * n, 1, false],         # bottom (j = 32), outer row is j = 33
+		[0, n, true],                    # left (i = 0), outer col is i = -1
+		[n - 1, n, false],               # right (i = 32), outer col is i = 33
+	]
+	for edge in edges:
+		var start: int = edge[0]
+		var step: int = edge[1]
+		var outer_first: bool = edge[2]
+		var base: int = verts.size()
+		for k in n:
+			var gi: int = start + k * step
+			var p: Vector3 = verts[gi] + center
+			verts.append(verts[gi] - p.normalized() * drop)
+			normals.append(normals[gi])
+		for k in GRID:
+			var s0: int = base + k
+			var s1: int = base + k + 1
+			var g0: int = start + k * step
+			var g1: int = start + (k + 1) * step
+			if outer_first:
+				indices.append(s0)
+				indices.append(s1)
+				indices.append(g0)
+				indices.append(s1)
+				indices.append(g1)
+				indices.append(g0)
+			else:
+				indices.append(g0)
+				indices.append(g1)
+				indices.append(s0)
+				indices.append(g1)
+				indices.append(s1)
+				indices.append(s0)
+
+	return {
+		"verts": verts,
+		"normals": normals,
+		"indices": indices,
+		"grid_index_count": grid_index_count,
+		"center": center,
+		"key": patch_key(face, depth, x, y),
+	}
+
+
+## Flattened triangle list for a ConcavePolygonShape3D, patch-center relative.
+## Grid triangles only — skirts are render-side crack fillers, not terrain.
+static func collision_faces(arrays: Dictionary) -> PackedVector3Array:
+	var verts: PackedVector3Array = arrays["verts"]
+	var indices: PackedInt32Array = arrays["indices"]
+	var count: int = arrays["grid_index_count"]
+	var faces := PackedVector3Array()
+	faces.resize(count)
+	for i in count:
+		faces[i] = verts[indices[i]]
+	return faces

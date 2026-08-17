@@ -35,6 +35,7 @@ var _mesh: MeshInstance3D
 var _static_body: StaticBody3D
 var _collision: CollisionShape3D
 var _rings: MeshInstance3D
+var _surface: PlanetSurface
 
 
 func setup(p_def: BodyDef) -> void:
@@ -44,29 +45,19 @@ func setup(p_def: BodyDef) -> void:
 
 
 func _build_visuals() -> void:
-	# Unit sphere, scaled to radius — so proxy scaling is a single multiply.
-	var sphere := SphereMesh.new()
-	sphere.radius = 1.0
-	sphere.height = 2.0
-	sphere.radial_segments = 64
-	sphere.rings = 32
-
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = def.albedo
-	mat.roughness = def.roughness
-	mat.metallic = 0.0
-	if def.emissive:
-		mat.emission_enabled = true
-		mat.emission = def.albedo
-		mat.emission_energy_multiplier = def.emission_energy
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-
-	_mesh = MeshInstance3D.new()
-	_mesh.name = "Mesh"
-	_mesh.mesh = sphere
-	_mesh.material_override = mat
-	_mesh.scale = Vector3.ONE * def.radius
-	add_child(_mesh)
+	if def.surface != null:
+		# Progressive cube-sphere terrain (docs/planet-renderer.md). Patch
+		# geometry is baked at metre scale, so the proxy ratio is the node
+		# scale itself — the same single multiply the sphere used.
+		_surface = PlanetSurface.new()
+		_surface.name = "PlanetSurface"
+		_surface.setup(
+			def.surface, def.radius, def.spin_period, def.spin_axis_tilt,
+			def.albedo, def.roughness
+		)
+		add_child(_surface)
+	else:
+		_build_sphere_visual()
 
 	if def.has_rings:
 		var torus := TorusMesh.new()
@@ -97,6 +88,33 @@ func _build_visuals() -> void:
 	_static_body.collision_mask = 0
 	_static_body.add_child(_collision)
 	add_child(_static_body)
+
+
+## The flat-shaded sphere: the Sun (emissive), and any body without a surface.
+func _build_sphere_visual() -> void:
+	# Unit sphere, scaled to radius — so proxy scaling is a single multiply.
+	var sphere := SphereMesh.new()
+	sphere.radius = 1.0
+	sphere.height = 2.0
+	sphere.radial_segments = 64
+	sphere.rings = 32
+
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = def.albedo
+	mat.roughness = def.roughness
+	mat.metallic = 0.0
+	if def.emissive:
+		mat.emission_enabled = true
+		mat.emission = def.albedo
+		mat.emission_energy_multiplier = def.emission_energy
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	_mesh = MeshInstance3D.new()
+	_mesh.name = "Mesh"
+	_mesh.mesh = sphere
+	_mesh.material_override = mat
+	_mesh.scale = Vector3.ONE * def.radius
+	add_child(_mesh)
 
 
 ## --- Analytic position -------------------------------------------------------
@@ -151,19 +169,52 @@ func update_render(t: float) -> void:
 		position = dir * MAX_RENDER_DISTANCE
 		_apply_scale(ratio)
 
+	if _surface:
+		_surface.body_is_proxy = is_proxy
+		# Spin is analytic from sim_time, like the orbits — never accumulated.
+		_surface.update_spin(t)
+
 	var want_collision: bool = true_distance < def.radius + COLLISION_ACTIVATION_MARGIN
+	if _surface and _surface.skim_active:
+		# Inside skim range the resident patches are the physics truth: the
+		# sphere would wall the ship out of valleys and let peaks through.
+		want_collision = false
 	if _collision.disabled == want_collision:
 		_collision.disabled = not want_collision
 
 
 func _apply_scale(ratio: float) -> void:
 	var r: float = def.radius * ratio
-	_mesh.scale = Vector3.ONE * r
+	if _mesh:
+		_mesh.scale = Vector3.ONE * r
+	if _surface:
+		# Scales the surface exactly as it scaled the sphere mesh — the
+		# angular-size proxy contract (docs/planet-renderer.md).
+		_surface.apply_scale_ratio(ratio)
 	if _rings:
 		_rings.scale = Vector3(r, r * 0.02, r)
 	if _collision and not _collision.disabled:
 		# Collision only runs un-proxied, so the true radius is correct there.
 		(_collision.shape as SphereShape3D).radius = def.radius
+
+
+## Radius as currently drawn — def.radius, shrunk by the proxy ratio when far.
+func visual_radius() -> float:
+	if is_proxy and true_distance > 0.0:
+		return def.radius * (MAX_RENDER_DISTANCE / true_distance)
+	return def.radius
+
+
+## The progressive terrain node, or null for sphere-only bodies (the Sun).
+## Whether the analytic sphere is currently carrying collision. False in skim
+## range, where the resident patches take over — the swap has to happen in both
+## directions or the ship is either walled out of valleys or passes through peaks.
+func sphere_collider_enabled() -> bool:
+	return _collision != null and not _collision.disabled
+
+
+func planet_surface() -> PlanetSurface:
+	return _surface
 
 
 ## Standoff distance the autopilot parks at.

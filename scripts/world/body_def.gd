@@ -40,6 +40,17 @@ class_name BodyDef
 @export var ring_inner_scale: float = 1.5
 @export var ring_outer_scale: float = 2.4
 
+## Surface parameterization for the progressive planet renderer. Bodies with a
+## surface get a PlanetSurface (relief, baked textures, spin); bodies without
+## one (the Sun) keep the plain sphere. See docs/planet-renderer.md.
+@export var surface: BodySurface = null
+
+## Simulation seconds per rotation, dramatized like orbital periods. 0 = none.
+@export var spin_period: float = 0.0
+
+## Spin axis tilt in radians, leaning the axis from +Y about the X axis.
+@export var spin_axis_tilt: float = 0.0
+
 ## Where the autopilot parks, as a multiple of `radius` from the centre.
 @export var arrival_standoff_scale: float = 2.5
 

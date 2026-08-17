@@ -179,25 +179,48 @@ Still needs a human at a keyboard — no assertion captures these:
 Design authority: `docs/planet-renderer.md` — the regimes, scale stylization,
 budgets and verification plan live there; this is the build order.
 
-### PR1 — Relief everywhere + night lights
-- [ ] `scripts/world/body_surface.gd`: `BodySurface extends Resource` — noise seed (derive from body id), `continent_frequency`, `ridged_mix`, `amplitude` (as fraction of radius, default 0.02), `sea_level` (-1 = none), `palette` (Gradient or 3–4 colors), `night_emissive: Texture2D` (optional), `authored_height/albedo: Texture2D` (optional, used INSTEAD of noise when set).
-- [ ] `BodyDef` gains `surface: BodySurface`, `spin_period` (0 = no spin), `spin_axis_tilt`. `SolarSystemData` fills surfaces for all 15 bodies (gas giants: amplitude 0, banded palette; Earth: sea_level set, hand-painted night-lights blob mask; Sun: none — keeps its emissive sphere).
-- [ ] `scripts/world/planet_surface.gd`: `PlanetSurface extends Node3D`, built by `CelestialBody._build_visuals()` when `def.surface` exists (else current sphere fallback). PR1 scope: 6 root cube-faces at fixed 33×33, displaced by the height source, one shared `ShaderMaterial`.
-- [ ] Bake per body at build: equirect albedo (from palette × height/sea), normal (from height gradient), emissive (night lights) — 512² is enough at PR1. Bake on a background thread; body shows flat color until ready (bodies build during bootstrap, so in practice it is ready before the player can look).
-- [ ] Shader `assets/shaders/planet_surface.gdshader`: albedo/normal lookup, emissive gated by terminator — `emissive_strength = smoothstep(0.05, -0.15, dot(normal, sun_dir))` so lights fade in across dusk. Sun direction as a global shader parameter set by SolarSystem (it already aims the light).
-- [ ] Spin: `CelestialBody` rotates the `PlanetSurface` child (NOT the collision sphere, NOT the node itself — children like future site anchors hang off the surface node) by `TAU * sim_time / spin_period` about the tilted axis. Analytic from `SimClock.sim_time` — never accumulate per-frame (trap: breaks time compression).
-- [ ] Proxy check: `_apply_scale` scales `PlanetSurface` exactly as it scaled the sphere mesh. Verify by screenshot at proxy range and at 30 km — same apparent size as before the change.
+### PR1 — Relief everywhere + night lights — BUILT (pending screenshot review)
+- [x] `scripts/world/body_surface.gd`: `BodySurface extends Resource` — noise seed (derive from body id), `continent_frequency`, `ridged_mix`, `amplitude` (as fraction of radius, default 0.02), `sea_level` (-1 = none), `palette` (Gradient or 3–4 colors), `night_emissive: Texture2D` (optional), `authored_height/albedo: Texture2D` (optional, used INSTEAD of noise when set).
+- [x] `BodyDef` gains `surface: BodySurface`, `spin_period` (0 = no spin), `spin_axis_tilt`. `SolarSystemData` fills surfaces for all 15 bodies (gas giants: amplitude 0, banded palette; Earth: sea_level set, hand-painted night-lights blob mask; Sun: none — keeps its emissive sphere).
+- [x] `scripts/world/planet_surface.gd`: `PlanetSurface extends Node3D`, built by `CelestialBody._build_visuals()` when `def.surface` exists (else current sphere fallback). PR1 scope: 6 root cube-faces at fixed 33×33, displaced by the height source, one shared `ShaderMaterial`.
+- [x] Bake per body at build: equirect albedo (from palette × height/sea), normal (from height gradient), emissive (night lights) — 512² is enough at PR1. Bake on a background thread; body shows flat color until ready (bodies build during bootstrap, so in practice it is ready before the player can look).
+- [x] Shader `assets/shaders/planet_surface.gdshader`: albedo/normal lookup, emissive gated by terminator — `emissive_strength = smoothstep(0.05, -0.15, dot(normal, sun_dir))` so lights fade in across dusk. Sun direction as a global shader parameter set by SolarSystem (it already aims the light).
+- [x] Spin: `CelestialBody` rotates the `PlanetSurface` child (NOT the collision sphere, NOT the node itself — children like future site anchors hang off the surface node) by `TAU * sim_time / spin_period` about the tilted axis. Analytic from `SimClock.sim_time` — never accumulate per-frame (trap: breaks time compression).
+- [x] Proxy check (delegated through `_apply_scale` → `apply_scale_ratio`): `_apply_scale` scales `PlanetSurface` exactly as it scaled the sphere mesh. Verify by screenshot at proxy range and at 30 km — same apparent size as before the change.
 - [ ] **PR1 gate**: travel + EVA + station suites green; `capture_shots.gd` extended — Earth full disc showing continents/sea, terminator with visible night lights, Moon relief at 10 km, Jupiter banding. Screenshots to owner.
 
-### PR2 — Progressive refinement + skim collision
-- [ ] Quadtree in `planet_surface.gd` (or split `planet_patch.gd`): subdivide when `patch_geometric_error / distance_to_camera > threshold` (start `0.004`), merge on hysteresis (×1.5). Re-evaluate at most every 0.25 s per body. Max depth 7.
-- [ ] Patch build on `WorkerThreadPool` (arrays on worker, `ArrayMesh` commit on main thread), ≤4 in flight per body; LRU cache 256 patches, never evict depth ≤2.
-- [ ] Skirts: edge ring dropped 2% of patch span below the surface. No T-junction stitching — skirts only.
-- [ ] Vertices relative to patch center; patch node positioned by center (float32 discipline per design doc).
-- [ ] **Skim collision**: when ship's true distance to surface < 500 m — build `ConcavePolygonShape3D` for resident patches within 300 m of the ship (on the worker), disable the body's sphere collider, enable ship CCD (`continuous_cd = true`). Reverse all three above 600 m (hysteresis). The sphere/patch swap is mandatory in BOTH directions — sphere walls you out of valleys, missing patches make peaks intangible.
-- [ ] `tests/planet_test.gd`: seam agreement (shared-edge vertices of same-depth neighbours within epsilon), determinism (same patch id ⇒ bit-identical arrays), approach monotonicity + return-to-baseline (streaming leak), budget caps never exceeded during a scripted proxy→spawn approach, scripted low pass at 60 m altitude / 80 m/s over 20 km of terrain — no tunnel-through, no invisible-sphere contact.
+### PR2 — Progressive refinement + skim collision — BUILT (pending screenshot review)
+- [x] Quadtree in `planet_surface.gd` (or split `planet_patch.gd`): subdivide when `patch_geometric_error / distance_to_camera > threshold` (start `0.004`), merge on hysteresis (×1.5). Re-evaluate at most every 0.25 s per body. Max depth 7.
+- [x] Patch build on `WorkerThreadPool` (arrays on worker, `ArrayMesh` commit on main thread), ≤4 in flight per body; LRU cache 256 patches, never evict depth ≤2.
+- [x] Skirts: edge ring dropped 2% of patch span below the surface. No T-junction stitching — skirts only.
+- [x] Vertices relative to patch center; patch node positioned by center (float32 discipline per design doc).
+- [x] **Skim collision**: when ship's true distance to surface < 500 m — build `ConcavePolygonShape3D` for resident patches within 300 m of the ship (on the worker), disable the body's sphere collider, enable ship CCD (`continuous_cd = true`). Reverse all three above 600 m (hysteresis). The sphere/patch swap is mandatory in BOTH directions — sphere walls you out of valleys, missing patches make peaks intangible.
+- [x] `tests/planet_test.gd`: seam agreement (shared-edge vertices of same-depth neighbours within epsilon), determinism (same patch id ⇒ bit-identical arrays), approach monotonicity + return-to-baseline (streaming leak), budget caps never exceeded during a scripted proxy→spawn approach, scripted low pass at 60 m altitude / 80 m/s over 20 km of terrain — no tunnel-through, no invisible-sphere contact.
 - [ ] **PR2 gate**: all suites green; screenshot set: continuous approach series (5 frames, no visible pop), low-skim frame with terrain filling the lower third.
 
+
+**Fixed / learned on the way through (PR1+PR2):**
+- `cache_capacity` raised 256 → 512. Measured: a depth-5 settle over Earth holds
+  ~230 leaves plus ancestors (~300 entries), and eviction correctly refuses to
+  drop live or shallow entries — so a 256 cap could not be honoured and only
+  caused thrash. The design doc's 256 was an estimate made before measuring.
+- `CelestialBody.sphere_collider_enabled()` added so the skim swap is observable
+  from tests.
+- Three test-harness traps worth knowing, all of which produced false readings
+  before being fixed: (1) a split commits only once all four children are built,
+  so the build queue empties *between* rounds — waiting on `is_quiescent()` alone
+  reports a far shallower tree than the metric asks for; settle until depth stops
+  changing. (2) The body's sphere collider is already distance-gated at
+  radius + 20 km, so a skim-swap assertion made from 30 km fails for an unrelated
+  reason — test the swap from inside the activation margin. (3) Cube-face patch
+  adjacency depends on the `face_dir` convention; assert shell closure (24 root
+  corners collapsing onto 8 cube corners, each shared by 3 faces) instead of
+  guessing which patches border each other.
+
+**Still open before the PR1/PR2 gates close:**
+- [ ] Screenshot sets for both gates (Earth disc with continents/sea, terminator
+  night lights, Moon relief, Jupiter banding; 5-frame continuous approach with no
+  pop; low-skim frame). Harness work only — the systems are verified.
 ### PR3 — Detail sites + NYC pilot
 - [ ] `scripts/world/detail_site.gd` per the design doc schema (`lat_deg/lon_deg/footprint_m/height_inset/scene/night_emissive/nav_note`).
 - [ ] Site streamer in `PlanetSurface`: in at 3 km, out at 4 km (hysteresis); scene oriented to the sphere tangent at (lat,lon), rotating with spin; inset height blended into overlapping patches with smoothstep falloff over the footprint.
