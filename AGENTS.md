@@ -65,7 +65,7 @@ These docs are sufficient to resume development from any point:
 - `docs/narrative.md` — tone, setting, crew concept, full story arc
 - `docs/tasks.md` — current task list
 
-An agent starting fresh should: read `architecture.md` first, then `plan.md` to find the active phase, then `tasks.md` for the current task. Do not invent systems not described in architecture.md — propose additions here first.
+An agent starting fresh should: read `architecture.md` first, then `tasks.md` — its ordering directive names the active track (currently Track SD, then Track PR; design docs: architecture.md "Stations and Docking" and `docs/planet-renderer.md`), and its "Standing traps" list is mandatory reading before writing code. `plan.md` gives the long-arc phases. Do not invent systems not described in architecture.md — propose additions here first.
 
 ## Travel and Scale (read before touching movement or world code)
 

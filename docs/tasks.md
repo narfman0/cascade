@@ -2,7 +2,19 @@
 
 _This file is populated by agents. Do not edit manually._
 
-**Ordering directive (from project owner):** Model 3D flight accurately. Get travel and lighting solid first (M1), then EVA (M2). Debris pickup, tools, and contracts come only after movement is verified — do not start M3 work until the M1 and M2 verification gates below have passed.
+**Ordering directive (from project owner, updated 2026-08-17):** Implementation
+order is now **Track SD (stations + docking) first, then Track PR (planet
+renderer)**. M3 (debris/tools/contracts) remains gated on the M1/M2 human feel
+checks. The original directive stands underneath: model 3D flight accurately;
+movement correctness before content.
+
+**Standing traps — read before writing any code in this project:**
+1. Never nest a RigidBody3D under another RigidBody3D (both transforms corrupt; see architecture.md). The EVA suit stows *out of the tree* while aboard.
+2. The physics server owns a live RigidBody3D's transform and reverts script writes — `freeze = true` before setting position/basis, and hold poses across *physics* frames (a frozen kinematic body's transform only commits through a physics step).
+3. `origin_shiftable` group membership: join it only for nodes holding a real render-space position (ship, suit). Anything recomputed from true space each frame (bodies, anchors, stations) must NOT join, or it gets double-shifted.
+4. Children `_ready` before parents: never place world content against the render origin in a child's `_ready` — GameWorld establishes the origin, then calls `refresh()`. Follow that bootstrap pattern.
+5. The ship station-keeps at ~131 m/s absolute (Earth's orbital velocity). Anything that must stay near it has to co-move; a one-shot teleport falls behind ~2 m per physics tick.
+6. After any change to flight, world, autopilot, or docking code, run BOTH suites: `godot --headless res://tests/travel_test.tscn` and `res://tests/eva_test.tscn`. They are the regression net for everything above.
 
 Read `docs/architecture.md` before starting. Scene tree, physics approach, and autoload responsibilities defined there are authoritative.
 
@@ -162,28 +174,94 @@ Still needs a human at a keyboard — no assertion captures these:
 
 ---
 
-## Track PR — Progressive Planet Renderer (designed, not started)
+## Track PR — Progressive Planet Renderer (start after SD2 gate passes)
 
-Design: `docs/planet-renderer.md` — read it first; it resolves the scale
-stylization, the three render regimes, and the integration contract with the
-proxy clamp. Owner-directed track; independent of the M3 gate.
+Design authority: `docs/planet-renderer.md` — the regimes, scale stylization,
+budgets and verification plan live there; this is the build order.
 
-- [ ] **PR1 — Relief everywhere + night lights**: `BodySurface` resource, cube-sphere root patches, procedural per-body height (seeded FastNoiseLite), baked albedo/normal/emissive, planet spin (`spin_period` on BodyDef), terminator-masked city-light emissive, proxy integration. Every nav destination stops being a smooth ball.
-- [ ] **PR2 — Progressive refinement**: quadtree + screen-space-error metric, skirts, WorkerThreadPool generation, LRU patch cache, `tests/planet_test.gd` (seams, determinism, budgets, streaming hysteresis).
-- [ ] **PR3 — Detail sites + NYC pilot**: `DetailSite` resource + streaming, inset heightmap blending, authored Earth/Moon/Mars maps cooked onto the asset server (`CASCADE_Planets` raw drop — public-domain NASA data), Manhattan diorama from POLYGON city packs (`SM_Bld_Background_*`), night street-grid emissive.
-- [ ] **PR4 (stretch)**: atmosphere rim shell, clouds, geomorphing, more sites.
+### PR1 — Relief everywhere + night lights
+- [ ] `scripts/world/body_surface.gd`: `BodySurface extends Resource` — noise seed (derive from body id), `continent_frequency`, `ridged_mix`, `amplitude` (as fraction of radius, default 0.02), `sea_level` (-1 = none), `palette` (Gradient or 3–4 colors), `night_emissive: Texture2D` (optional), `authored_height/albedo: Texture2D` (optional, used INSTEAD of noise when set).
+- [ ] `BodyDef` gains `surface: BodySurface`, `spin_period` (0 = no spin), `spin_axis_tilt`. `SolarSystemData` fills surfaces for all 15 bodies (gas giants: amplitude 0, banded palette; Earth: sea_level set, hand-painted night-lights blob mask; Sun: none — keeps its emissive sphere).
+- [ ] `scripts/world/planet_surface.gd`: `PlanetSurface extends Node3D`, built by `CelestialBody._build_visuals()` when `def.surface` exists (else current sphere fallback). PR1 scope: 6 root cube-faces at fixed 33×33, displaced by the height source, one shared `ShaderMaterial`.
+- [ ] Bake per body at build: equirect albedo (from palette × height/sea), normal (from height gradient), emissive (night lights) — 512² is enough at PR1. Bake on a background thread; body shows flat color until ready (bodies build during bootstrap, so in practice it is ready before the player can look).
+- [ ] Shader `assets/shaders/planet_surface.gdshader`: albedo/normal lookup, emissive gated by terminator — `emissive_strength = smoothstep(0.05, -0.15, dot(normal, sun_dir))` so lights fade in across dusk. Sun direction as a global shader parameter set by SolarSystem (it already aims the light).
+- [ ] Spin: `CelestialBody` rotates the `PlanetSurface` child (NOT the collision sphere, NOT the node itself — children like future site anchors hang off the surface node) by `TAU * sim_time / spin_period` about the tilted axis. Analytic from `SimClock.sim_time` — never accumulate per-frame (trap: breaks time compression).
+- [ ] Proxy check: `_apply_scale` scales `PlanetSurface` exactly as it scaled the sphere mesh. Verify by screenshot at proxy range and at 30 km — same apparent size as before the change.
+- [ ] **PR1 gate**: travel + EVA + station suites green; `capture_shots.gd` extended — Earth full disc showing continents/sea, terminator with visible night lights, Moon relief at 10 km, Jupiter banding. Screenshots to owner.
 
-Open questions for owner (full context in the design doc): green-light the
-real-Earth map drop; site list beyond NYC; whether relief ever needs collision.
+### PR2 — Progressive refinement + skim collision
+- [ ] Quadtree in `planet_surface.gd` (or split `planet_patch.gd`): subdivide when `patch_geometric_error / distance_to_camera > threshold` (start `0.004`), merge on hysteresis (×1.5). Re-evaluate at most every 0.25 s per body. Max depth 7.
+- [ ] Patch build on `WorkerThreadPool` (arrays on worker, `ArrayMesh` commit on main thread), ≤4 in flight per body; LRU cache 256 patches, never evict depth ≤2.
+- [ ] Skirts: edge ring dropped 2% of patch span below the surface. No T-junction stitching — skirts only.
+- [ ] Vertices relative to patch center; patch node positioned by center (float32 discipline per design doc).
+- [ ] **Skim collision**: when ship's true distance to surface < 500 m — build `ConcavePolygonShape3D` for resident patches within 300 m of the ship (on the worker), disable the body's sphere collider, enable ship CCD (`continuous_cd = true`). Reverse all three above 600 m (hysteresis). The sphere/patch swap is mandatory in BOTH directions — sphere walls you out of valleys, missing patches make peaks intangible.
+- [ ] `tests/planet_test.gd`: seam agreement (shared-edge vertices of same-depth neighbours within epsilon), determinism (same patch id ⇒ bit-identical arrays), approach monotonicity + return-to-baseline (streaming leak), budget caps never exceeded during a scripted proxy→spawn approach, scripted low pass at 60 m altitude / 80 m/s over 20 km of terrain — no tunnel-through, no invisible-sphere contact.
+- [ ] **PR2 gate**: all suites green; screenshot set: continuous approach series (5 frames, no visible pop), low-skim frame with terrain filling the lower third.
 
-## Track SD — Stations and Docking (designed, not started)
+### PR3 — Detail sites + NYC pilot
+- [ ] `scripts/world/detail_site.gd` per the design doc schema (`lat_deg/lon_deg/footprint_m/height_inset/scene/night_emissive/nav_note`).
+- [ ] Site streamer in `PlanetSurface`: in at 3 km, out at 4 km (hysteresis); scene oriented to the sphere tangent at (lat,lon), rotating with spin; inset height blended into overlapping patches with smoothstep falloff over the footprint.
+- [ ] Authored maps: Earth/Moon/Mars height+albedo (public domain: NASA Blue Marble, LRO LOLA, MOLA), 2–4k equirect PNG. Preferred home: asset-server raw drop `CASCADE_Planets` (needs owner/server write access); fallback if the server is not writable from the dev box: commit under `assets/planets/` (a few MB, un-ignored) and note the migration. Do not block the milestone on server access.
+- [ ] NYC pilot `scenes/sites/nyc.tscn`: add `POLYGON_SciFi_City` + `POLYGON_City` to `DEFAULT_PACKS` (now, not before), Manhattan grid from `SM_Bld_Background_*` at miniature scale (towers 25–40 m), rivers/harbor from the height inset, emissive street-grid night texture. Placed at 40.7 N, −74.0 E on the REAL Earth map — the recognizable-coastline premise needs the authored map, so that item precedes this one.
+- [ ] **PR3 gate**: all suites green + site stream-in/out test; the money shot — NYC at night from 2 km, terminator in frame. Owner review.
 
-Design: architecture.md "Stations and Docking". Owner-directed. Depends on
-nothing in Track PR; shares the destination-interface refactor with it.
+### PR4 (stretch — owner call): atmosphere rim shell, clouds, geomorphing, more sites (Canaveral, Baikonur, Shanghai, Tycho, Olympus Mons).
 
-- [ ] **SD1 — Stations on rails**: `StationDef`, orbit math extracted to a shared helper, `OrbitalStation` scene from POLYGON station modules, destination interface for Autopilot/NavConsole (stations listed with live ETAs), station influence in `reference_body()`.
-- [ ] **SD2 — Docking**: `DockingPort` (volume + axis), soft-capture rules (closing speed, alignment), docked state (freeze + parent to port, controls stand down, `interact` context), undock push-off, HUD approach readout (closing speed, axis error). Headless test: scripted approach docks; misaligned or hot approach refuses; undock restores exact free flight.
-- [ ] **SD3 (stretch)**: assisted approach via ManeuverMinigame; ship-to-ship ports.
+## Track SD — Stations and Docking (ACTIVE — implement first)
+
+Design authority: architecture.md "Stations and Docking". Read it, then this.
+
+### SD1 — Stations on rails + destination interface
+
+**SD1.1 Extract the orbit math**
+- [ ] New `scripts/world/orbit_math.gd` (`class_name OrbitMath`), static funcs `offset_at(t, radius, period, phase, inclination) -> Array` and `velocity_offset_at(...) -> Array` — 64-bit `[x,y,z]`, exactly the formulas now inlined in `CelestialBody.position_at/velocity_at` (circular orbit, plane tilted about X).
+- [ ] Refactor `CelestialBody` to call them. `tests/travel_test.gd` must stay green unchanged — it asserts orbit integrity and the velocity/position-derivative match, so it IS the refactor's safety net.
+
+**SD1.2 NavTarget base class (the destination interface)**
+- [ ] New `scripts/world/nav_target.gd`: `class_name NavTarget extends Node3D` with overridable methods: `position_at(t) -> Array`, `velocity_at(t) -> Array`, `arrival_standoff() -> float`, `influence_radius() -> float`, `frame_depth() -> int`, `nav_display_name() -> String`, `nav_note() -> String`, `is_nav_destination() -> bool`. GDScript has no interfaces — a base class is the honest version.
+- [ ] `CelestialBody extends NavTarget`; move `def.display_name` / `def.nav_note` / `def.is_destination` access behind the new methods.
+- [ ] Update every call site that reaches into `.def` from outside: `autopilot.gd` (3 sites: engaged emit, arrival name, status line), `nav_console.gd` (row text, footer note), `solar_system.gd` (`destinations()` filter, `reference_body()` depth/influence). Grep for `\.def\.` outside `celestial_body.gd` afterwards — zero hits is the done condition.
+- [ ] `Autopilot.target`, `engage()`, `_aim_point()`, `estimate_transfer()` retype `CelestialBody` → `NavTarget`. `SolarSystem.destinations()` returns `Array[NavTarget]`.
+
+**SD1.3 OrbitalStation**
+- [ ] `scripts/world/station_def.gd`: `StationDef extends Resource` — `id`, `display_name`, `parent_id` (body), `orbit_radius`, `orbit_period`, `orbit_phase`, `inclination`, `nav_note`, `standoff` (default 200.0), `influence` (default 2000.0).
+- [ ] `scripts/world/orbital_station.gd`: `OrbitalStation extends NavTarget`. Position = parent body's `position_at(t)` + `OrbitMath.offset_at(...)`; velocity likewise. Recomputes render position from true space every `_process` (do NOT join `origin_shiftable` — trap #3). `frame_depth()` = parent's depth + 1, so the deepest-wins reference rule resolves the station without special cases.
+- [ ] Station scene `scenes/stations/meridian_relay.tscn`: build from `assets/.../SM_Ship_Station_06.gltf` (60×101×52 m — the manifest's "good first docking target"; fetch via `./fetch_assets.sh`, it is in the POLYGON_Scifi_Space pack) plus a nav-light emissive or two. StaticBody3D collision (layer 4) from 2–3 box shapes approximating the tower — NOT a trimesh of the whole mesh.
+- [ ] First station: "Meridian Relay", Earth orbit — `orbit_radius 9000.0`, `orbit_period 2200.0`, phase ~2.0 so it is not on top of spawn. Registered by GameWorld bootstrap (follow the existing `_wire_systems` pattern; SolarSystem gains `register_station()` / stations included in `destinations()` and `reference_body()`).
+- [ ] Nav console shows it with live distance/ETA (should require zero console changes if SD1.2 is done right — that is itself the check).
+
+**SD1 gate (extend `tests/travel_test.gd` or new `tests/station_test.gd`):**
+- [ ] Station's distance from parent body equals `orbit_radius` at 200 sampled times (same style as the Moon check).
+- [ ] Autopilot `engage(station)` converges: arrives at ~`standoff`, velocity-matched to the station (which is MOVING — this exercises the interface + intercept math end to end).
+- [ ] `reference_body()` inside 2 km of the station returns the station; flight assist holds station in its frame (relative velocity < 0.5 after settle).
+- [ ] Both existing suites green.
+
+### SD2 — Docking
+
+**SD2.1 DockingPort**
+- [ ] `scripts/docking_port.gd`: `DockingPort extends Node3D`, child `Area3D` capture volume (box ~6×6×10 m extending along the port's +Z approach axis), joins group `&"docking_ports"`. Exports: `capture_speed_max = 1.5` (m/s, relative), `capture_angle_max_deg = 20.0`. One port on Meridian Relay, axis pointing away from the tower.
+- [ ] `scripts/docking_computer.gd`: node on Ship (like Autopilot). Each physics tick while not docked: nearest port within its volume → check relative velocity (`ship.linear_velocity - port.station_velocity()`) and alignment (ship −Z vs port axis). All conditions met → capture.
+
+**SD2.2 The docked state**
+- [ ] Capture sequence, in order: `ship.freeze = true` (FREEZE_MODE_KINEMATIC) → **remove ship from `origin_shiftable` group** → reparent ship under the port preserving global transform → zero relative motion → `GameState.docked = true` (new bool + signal on GameState). Order matters: the station recomputes from true space each frame and the ship inherits through the tree; leaving the ship in the shiftable group double-moves it on the next origin shift. This is trap #3 wearing a new hat — it WILL happen if skipped, and it will look like the 16 km lurch bug.
+- [ ] While docked: ship_controller and autopilot stand down (same guard pattern as `autopilot_active`); nav console may open but `engage` refuses; HUD shows "DOCKED — Meridian Relay" and `F — Undock` (interact priority while docked: undock beats EVA-exit).
+- [ ] Ship fuel refills while docked (station services; instant for now, same as EVA refill precedent).
+- [ ] Undock, in order: reparent ship back under GameWorld (preserve global transform) → re-add to `origin_shiftable` → `freeze = false` → `linear_velocity = station velocity` + push-off `~1.0 m/s` along port axis → `docked = false`. Flight assist on.
+- [ ] EVA while docked: `request_exit` allowed (suit exits at hatch as normal, ship stays docked). Boarding returns to the docked ship. No special casing beyond the interact priority.
+
+**SD2.3 Approach HUD**
+- [ ] When inside a port's capture volume (and not docked): readout block — distance to port, closing speed, axis error in degrees; each line flips subtly (modulate) when within capture tolerance. Calm per tone; no red.
+
+**SD2 gate (`tests/docking_test.gd`, headless):**
+- [ ] Scripted clean approach (co-moving with station, drift in aligned at 0.5 m/s) → captures; ship frozen, parented under port, `docked == true`, NOT in shiftable group.
+- [ ] Hot approach (3 m/s) does NOT capture; misaligned (35°) does NOT capture.
+- [ ] Docked through an origin shift (force `OriginShift.shift_by(Vector3(20000,0,0))` while docked) — ship stays exactly at the port (this is the trap-#3 regression test).
+- [ ] Docked through 60 s of sim time — station orbits on, ship rides it, no drift relative to port.
+- [ ] Undock: free flight restored, velocity = station velocity + push-off, back in shiftable group, both other suites still green.
+- [ ] Screenshots via a `capture_docking_shots.gd` harness: approach with HUD readout, docked wide shot, undock push-off. (Reuse the review-camera pattern from `capture_eva_shots.gd`; remember trap #2 for posing.)
+
+### SD3 (stretch — do not start without owner)
+- [ ] Assisted approach via ManeuverMinigame; ship-to-ship ports (host stays live, guest freezes — the stowed-suit pattern).
 
 ## Milestone 3 — Debris capture + contracts (DO NOT START)
 
