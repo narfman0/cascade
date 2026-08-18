@@ -66,9 +66,8 @@ func _ready() -> void:
 		await _settle(20)
 		await _shot("08_eva_at_debris")
 
-	# 4. Earth as the backdrop — scale reference.
-	await _pose(_ship.global_position + _hatch_dir() * 12.0,
-		OriginShift.to_render(earth.true_pos))
+	# 4. Earth as the backdrop — the suit lit, the planet filling the frame behind.
+	await _face_body(earth, 2200.0)
 	await _settle(20)
 	await _shot("09_eva_earthside")
 
@@ -109,10 +108,25 @@ func _pose(where: Vector3, look_at_target: Vector3) -> void:
 
 ## Pose the suit facing `subject`, positioned so the sun is behind the rig
 ## camera — otherwise the camera looks at the suit's shadow side and, with only
-## faint earthshine for fill, the frame is near black.
+## faint earthshine for fill, the suit is a black silhouette against black space
+## and reads as simply absent.
 func _face(subject: Vector3, standoff: float) -> void:
-	var from: Vector3 = subject - _sunward * standoff + Vector3.UP * (standoff * 0.15)
+	# Sun *side* of the subject, not the far side: the rig camera sits behind the
+	# suit, so putting the suit sunward of what it faces is what places the sun
+	# behind the camera and lights the surface we actually see. (_face_body has
+	# always done this correctly, which is why the planet shots lit and these
+	# did not.)
+	var from: Vector3 = subject + _sunward * standoff + Vector3.UP * (standoff * 0.15)
 	await _pose(from, subject)
+
+
+## Same, but for a subject too large to stand off from directly (a planet): sit
+## `gap` metres off its surface along the sunward line, so the rig camera has the
+## sun behind it, the suit is lit, and the body fills the frame behind.
+func _face_body(body: CelestialBody, gap: float) -> void:
+	var centre: Vector3 = OriginShift.to_render(body.true_pos)
+	var from: Vector3 = centre + _sunward * (body.def.radius + gap)
+	await _pose(from, centre)
 
 
 func _settle(frames: int) -> void:
