@@ -333,7 +333,31 @@ originally designed — no fetch pipeline, no tiling, no server drop.
   someone's afternoon eventually (a WorkerThreadPool or server finalize wait,
   most likely), but it is not this milestone's bug.
 
-### PR4 (stretch — owner call): atmosphere rim shell, clouds, geomorphing, more sites (Canaveral, Baikonur, Shanghai, Tycho, Olympus Mons).
+### PR4 — Atmosphere and scattering (owner-requested 2026-08-18)
+
+Design: `docs/planet-renderer.md` → "Atmosphere and scattering". Read it first;
+the lighting behaviour is the requirement, not a coloured rim.
+
+- [ ] `scripts/world/body_atmosphere.gd`: `BodyAtmosphere extends Resource` — `height_fraction` (of radius, Earth ~0.01), `rayleigh_coefficients: Vector3` (per-channel, Earth ≈ (5.8, 13.5, 33.1)e-6 scaled to our units), `rayleigh_scale_height`, `mie_coefficient`, `mie_scale_height`, `mie_g` (forward-scatter anisotropy, ~0.76), `sun_intensity`, `ground_albedo_tint`, `opaque` (Venus: surface never visible).
+- [ ] `BodyDef` gains `atmosphere: BodyAtmosphere = null`. **Null means airless and must stay visibly airless** — hard terminator, black limb. Mercury, Moon, Io, Europa, Ganymede and Callisto keep null on purpose; losing the Moon's harsh look is the main failure mode of this milestone.
+- [ ] `SolarSystemData`: fill in Earth (Rayleigh blue), Venus (thick opaque yellow-white), Mars (thin Mie butterscotch, blue-ish sunsets — the inverse of Earth's), Titan (thick orange haze). Gas giants get a limb-softening term only, no shell — their visible surface already is atmosphere.
+- [ ] `assets/shaders/atmosphere.gdshader` + a shell MeshInstance3D under `PlanetSurface` at `radius * (1 + height_fraction)`: back-face rendered, single-scattering ray march (start 16 view steps × 4 light steps), Rayleigh + Mie with Henyey-Greenstein phase. Sun direction from the existing `planet_sun_direction` global — do not add a second source.
+- [ ] **Camera-inside-the-shell** handling: skimming and low orbit put the viewer inside the volume. Get the depth/cull setup right or the sky disappears exactly when the player is closest to it.
+- [ ] **Proxy integration**: the shell scales through the same `_apply_scale` → `apply_scale_ratio` path as the surface, or it detaches from its planet at proxy range. travel_test guards that contract.
+- [ ] **Twilight drives the city lights.** Derive the twilight band width from scale height and radius, and feed it to the surface shader's night gate, replacing the hardcoded `smoothstep(0.05, -0.15, dot(n, sun))`. If the lights fade across a different band than the sky does, the two disagree visibly at the terminator — which is exactly the region every good orbital screenshot is framed on.
+- [ ] **Aerial perspective** for skimming: distant terrain desaturates toward sky colour with optical depth. PR2 made this reachable; without it a low pass looks like an airless body with a blue ring.
+- [ ] Composite order with the surface's ALBEDO/EMISSION so night lights read through thin atmosphere and are properly extinguished by thick.
+- [ ] Stretch within PR4: replace the flat `ambient_light_energy = 1.1` fudge in `scenes/game_world.tscn` with sky-scattering-derived fill near a body.
+
+**PR4 gate** — the assertions matter here because "it looks nice" is not a test. Extend `tests/planet_test.gd` (or `atmosphere_test.gd`) with a CPU mirror of the scattering integral:
+- [ ] Airless bodies scatter exactly zero, and their terminator stays hard (sample surface luminance either side of the geometric terminator — the step must remain sharp).
+- [ ] Twilight band width matches the analytic prediction from scale height, and the city-lights gate uses that same width (guards the disagreement above).
+- [ ] Optical depth increases monotonically toward the limb, and is finite at grazing incidence (no divide-by-zero at the horizon — the classic bug).
+- [ ] Sunset reddening: the R/B ratio of transmitted light rises monotonically as sun elevation falls.
+- [ ] Proxy: atmosphere angular size tracks the planet's at proxy range.
+- [ ] Screenshots: Earth limb arc from orbit, sunset from low orbit, Earth's soft terminator beside the Moon's hard one in one frame (the money comparison), Mars butterscotch, Titan haze, and a skim pass showing aerial perspective.
+
+### PR5 (stretch — owner call): clouds, geomorphing, more detail sites (Canaveral, Baikonur, Shanghai, Tycho, Olympus Mons).
 
 ## Track SD — Stations and Docking (SD1 + SD2 COMPLETE — SD3 remains stretch)
 

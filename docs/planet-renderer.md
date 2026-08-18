@@ -25,8 +25,10 @@ milestone breakdown is at the bottom and mirrored in docs/tasks.md.
   promotes relief from visual-only to collidable near the surface; see "Skimming
   and collision" below. The renderer must hold up from standoff distance down to
   a skimming pass, not from a walking camera.
-- **Atmospheric scattering / clouds.** A cheap rim-glow shell is listed as a
-  stretch item; real scattering is out of scope.
+- **Clouds.** A separate animated layer is still out of scope.
+  (Atmospheric scattering is no longer a non-goal — the owner promoted it to
+  PR4 on 2026-08-18, with accurate lighting as the point of the exercise. See
+  "Atmosphere and scattering" below.)
 - **Real-time terrain deformation.** Heightmaps are static.
 - **Streamed or high-fidelity terrain data.** Explicitly deferred by the owner.
   Global maps are coarse (2k) and committed; the layered height lookup leaves
@@ -270,6 +272,84 @@ depth caps.
   the spin axis; site streams in only inside its radius
 - plus `capture_shots.gd` additions: Earth full disc (A), limb at 30 km (B),
   NYC at night from 2 km (C) — the money shot for review
+
+## Atmosphere and scattering (PR4 — designed, not built)
+
+Owner direction, 2026-08-18: atmosphere on all planets, **with special attention
+to accurate lighting**. The lighting is the substance here; a coloured rim shell
+would be a sticker. What follows is what "accurate" has to mean for a game played
+from orbit.
+
+### What atmosphere changes about light
+
+1. **Rayleigh scattering** — molecular, wavelength⁻⁴, so blue scatters ~5.5×
+   more than red. Gives the blue day sky, the blue limb arc from orbit, and red
+   sunsets (long slant path scatters the blue out before it reaches the eye).
+2. **Mie scattering** — aerosols and dust, largely wavelength-neutral and
+   strongly forward-scattering. The white haze around the sun, the whole of
+   Venus, and most of Mars's colour.
+3. **A soft terminator.** This is the one that matters most here and the one a
+   rim shell cannot fake. An airless body has a razor day/night line; an
+   atmosphere lights a twilight band *past* the geometric terminator, whose
+   angular width follows from scale height and planet radius. **Our city-lights
+   gate currently hardcodes that width** as `smoothstep(0.05, -0.15, dot(n, sun))`
+   in planet_surface.gdshader. Once atmosphere exists, twilight width must be
+   derived from the atmosphere parameters and *drive* that gate, or the lights
+   will fade across a different band than the sky does and the two will visibly
+   disagree at the terminator.
+4. **Aerial perspective** — terrain seen through air desaturates and shifts
+   toward the sky colour with distance. Newly relevant because PR2 added
+   skimming: flying low, distant terrain should haze out rather than stay
+   crisp to the horizon.
+5. **Limb glow** — the iconic orbital image: a bright arc on the limb against
+   black, brightest where the sun sits behind it (forward Mie). Falls out of
+   correct optical depth along a grazing ray; it does not need special-casing.
+6. **Ambient from the sky.** `scenes/game_world.tscn` currently fakes fill with a
+   flat `ambient_light_energy = 1.1`. In atmosphere that fill is really sky
+   scattering, and should ideally come from the same model near a body — noted
+   as a stretch, not required for the gate.
+
+### Approach
+
+Single-scattering, analytic, evaluated in a shader on a back-face sphere shell of
+radius `radius * (1 + atmosphere_height_fraction)`. Ray-march the view ray
+through the shell (16 steps, 4 light-samples per step as a starting point),
+accumulating Rayleigh + Mie in-scatter with Henyey-Greenstein phase for Mie.
+
+Full Bruneton-style precomputed LUTs are deliberately **not** the tier here: at
+r = 2000 m compressed scale, with the coarse-data ceiling already accepted for
+heightmaps, single scattering is the honest match. If the twilight band or the
+sunset gradient looks wrong after tuning, revisit — do not pre-emptively build
+the LUT path.
+
+### Per-body parameters (new `BodyAtmosphere` resource)
+
+Every body gets an explicit answer, including "none" — **airless bodies must keep
+looking airless**. The Moon's harsh, high-contrast, hard-terminator look is a
+real visual signature and the easy failure mode here is applying a default
+atmosphere everywhere and quietly destroying it.
+
+| Body | Atmosphere |
+|---|---|
+| Earth | Rayleigh-dominant, blue, ~1% of radius |
+| Venus | Thick, opaque, yellow-white; surface effectively never visible |
+| Mars | Thin, dusty; Mie-dominant butterscotch, blue-ish sunsets (the inverse of Earth) |
+| Titan | Thick orange haze, Mie-dominant |
+| Jupiter, Saturn, Uranus, Neptune | No shell — the visible "surface" already *is* atmosphere. A limb-softening term only |
+| Mercury, Moon, Io, Europa, Ganymede, Callisto | **None.** Hard terminator, black limb |
+
+### Traps this will hit
+
+- **The proxy clamp.** A far body renders at `MAX_RENDER_DISTANCE` scaled down; the
+  shell must scale through the same `_apply_scale` path or it detaches from its
+  planet at range. This is the contract travel_test guards.
+- **Camera inside the shell.** Skimming and low orbit put the camera *inside* the
+  atmosphere volume. Back-face rendering with the right depth handling is
+  required, or the sky vanishes exactly when the player is closest to it.
+- **Sun direction** already exists — `planet_sun_direction` global uniform,
+  mirrored by `SolarSystem.sun_direction`. Reuse it; do not add a second source.
+- **Composite order** with the surface shader's ALBEDO/EMISSION, so night lights
+  read *through* thin atmosphere but are properly extinguished by thick.
 
 ## Milestones
 
