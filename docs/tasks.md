@@ -8,6 +8,12 @@ renderer)**. M3 (debris/tools/contracts) remains gated on the M1/M2 human feel
 checks. The original directive stands underneath: model 3D flight accurately;
 movement correctness before content.
 
+**Running the suites:** all five exit cleanly and fast — travel ~8 s, docking
+~7 s, eva ~8 s, station ~12 s, planet ~127 s, every one exit 0. If a suite ever
+hangs after printing PASS again, suspect un-drained `WorkerThreadPool` tasks:
+Godot blocks on the pool at shutdown, so any node that spawns tasks must wait for
+them in `_exit_tree` (see `PlanetSurface._exit_tree`).
+
 **Standing traps — read before writing any code in this project:**
 1. Never nest a RigidBody3D under another RigidBody3D (both transforms corrupt; see architecture.md). The EVA suit stows *out of the tree* while aboard.
 2. The physics server owns a live RigidBody3D's transform and reverts script writes — `freeze = true` before setting position/basis, and hold poses across *physics* frames (a frozen kinematic body's transform only commits through a physics step).

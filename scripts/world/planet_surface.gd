@@ -427,6 +427,19 @@ func _evict_overflow() -> void:
 		_cache.erase(victim.key)
 
 
+## Drain outstanding worker tasks before this node goes away.
+##
+## Patch, bake and collision builds run on WorkerThreadPool and capture
+## references into this node. Nothing awaited them at shutdown, so Godot blocked
+## on the pool while the scene tore down: every headless suite printed its
+## results and then hung at 0% CPU instead of exiting, which made the runs look
+## like timeouts to anyone reading exit codes rather than logs.
+func _exit_tree() -> void:
+	for id in _task_ids:
+		WorkerThreadPool.wait_for_task_completion(id)
+	_task_ids.clear()
+
+
 func _reap_tasks() -> void:
 	var i := 0
 	while i < _task_ids.size():
