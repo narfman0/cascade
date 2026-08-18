@@ -13,6 +13,14 @@ class_name PlanetSurface extends Node3D
 ## `apply_scale_ratio`, which scales this node exactly as it scaled the old
 ## sphere mesh, so the angular-size trick keeps working unchanged.
 ##
+## Detail sites: an authored place (NYC) streams its scene in inside
+## `site_enter_distance` and out past `site_exit_distance`, so hovering at the
+## boundary cannot thrash. The scene is authored flat and anchored to the sphere
+## tangent here; because the anchor hangs under this node it turns with the spin
+## for free. A resident site also pins its patches to `site_min_depth` — the
+## error metric alone leaves ~12 m vertex spacing at the altitude a site is read
+## from, and the inset has nothing that coarse to say.
+##
 ## Skim collision: near the surface the analytic sphere collider lies — it
 ## walls the ship out of valleys and lets it through peaks. Inside skim range
 ## this node builds trimesh colliders for the resident patches around the ship,
@@ -38,11 +46,13 @@ signal textures_baked
 @export var max_in_flight: int = 4
 
 ## LRU cache budget of built patches.
-# Measured, not estimated: a depth-5 settle over Earth holds ~230 leaves plus
-# their ancestors, about 300 entries, and eviction cannot drop entries that are
-# live or shallow. A cache smaller than the working set does not save memory, it
-# just thrashes. 512 x 33^2 verts is still only ~18 MB.
-@export var cache_capacity: int = 512
+# Measured, not estimated, and raised twice for the same reason: eviction cannot
+# drop entries that are live or shallow, so a cache smaller than the working set
+# saves no memory and only thrashes. A depth-5 settle over Earth held ~300
+# entries (512 was enough); pinning the patches under a resident detail site to
+# depth 6 takes a 2.6 km settle to 429 leaves and 570 entries. 1024 x 33^2 verts
+# is ~36 MB, which buys headroom for a second site without another measurement.
+@export var cache_capacity: int = 1024
 
 ## Never evict patches at or above this depth — the coarse shell never rebuilds.
 @export var cache_keep_depth: int = 2
@@ -58,7 +68,22 @@ signal textures_baked
 ## Build trimesh colliders for resident patches within this range of the ship.
 @export var skim_collider_range: float = 300.0
 
-@export var bake_size: int = 512
+## Detail-site streaming distances, observer to site. Hysteresis: parking at the
+## boundary must not thrash a scene in and out (design doc: in at 3 km, out at 4).
+@export var site_enter_distance: float = 3000.0
+@export var site_exit_distance: float = 4000.0
+
+## Patches overlapping a resident site refine to at least this depth regardless
+## of the error metric. At Earth's radius that is a 49 m patch — 1.5 m vertex
+## spacing — which is what makes a 512² inset over a 400 m footprint mean
+## anything. The metric alone stops at depth 3 from 2 km up.
+@export var site_min_depth: int = 6
+
+## Equirect bake WIDTH (the map is 2:1). Only the normal map is baked for a body
+## with authored albedo and night lights. 768 is a measured ceiling, not a taste:
+## a bake costs ~2.7 us per texel in GDScript and fourteen bodies bake at once
+## during bootstrap, so doubling it doubles how long every body stays flat.
+@export var bake_size: int = 768
 
 var surface_res: BodySurface
 var radius: float = 1000.0
@@ -87,6 +112,9 @@ var _skim_body: StaticBody3D = null
 var _skim_ship: RigidBody3D = null
 var _collider_nodes: Dictionary = {}
 
+## Per-site runtime state, keyed by DetailSite.id.
+var _sites: Dictionary = {}
+
 
 class QuadNode extends RefCounted:
 	var face: int
@@ -97,6 +125,16 @@ class QuadNode extends RefCounted:
 	var center: Vector3
 	var mi: MeshInstance3D = null
 	var children: Array = []
+
+
+class SiteState extends RefCounted:
+	var site: DetailSite
+	var dir: Vector3
+	var local_pos: Vector3
+	var basis: Basis
+	var angular_radius: float
+	var resident: bool = false
+	var anchor: Node3D = null
 
 
 class CacheEntry extends RefCounted:
@@ -119,7 +157,9 @@ func setup(
 	radius = p_radius
 	spin_period = p_spin_period
 	spin_axis_tilt = p_spin_axis_tilt
-	surface_res.prepare()
+	# Sites are metres on the sphere, so their angular extent needs the radius.
+	surface_res.prepare(radius)
+	_build_site_states()
 
 	_material = ShaderMaterial.new()
 	_material.shader = load("res://assets/shaders/planet_surface.gdshader")
@@ -188,21 +228,36 @@ func force_evaluate() -> void:
 func _evaluate() -> void:
 	if body_is_proxy:
 		# Regime A: root patches only. The proxy scales them; the error metric
-		# never runs against a scaled world.
+		# never runs against a scaled world. Nothing this far away is a site.
+		_release_all_sites()
 		for root in _roots:
 			_merge(root)
 		_evict_overflow()
 		return
-	var cam := get_viewport().get_camera_3d()
-	if cam == null:
+	var eye: Variant = _observer_position()
+	if eye == null:
 		return
-	var cam_pos := cam.global_position
+	var cam_pos: Vector3 = eye
+	_update_sites(cam_pos)
 	var amp_m: float = radius * surface_res.amplitude
 	for root in _roots:
 		_update_node(root, cam_pos, amp_m)
 	if skim_active:
 		_refresh_colliders()
 	_evict_overflow()
+
+
+## Whose eye drives refinement and site streaming. The viewport camera is the
+## honest answer — it is what the error metric is a screen-space error *of* —
+## with the tracked ship as the fallback for a frame before the rig exists.
+func _observer_position() -> Variant:
+	var cam := get_viewport().get_camera_3d()
+	if cam != null:
+		return cam.global_position
+	var ship := OriginShift.tracked
+	if ship != null and is_instance_valid(ship):
+		return (ship as Node3D).global_position
+	return null
 
 
 ## Screen-space error: patch geometric error over camera distance. Geometric
@@ -217,14 +272,31 @@ func _patch_error(node: QuadNode, cam_pos: Vector3, amp_m: float) -> float:
 
 func _update_node(node: QuadNode, cam_pos: Vector3, amp_m: float) -> void:
 	var err := _patch_error(node, cam_pos, amp_m)
+	var pinned := node.depth < site_min_depth and _overlaps_resident_site(node)
 	if node.children.is_empty():
-		if err > subdivide_threshold and node.depth < max_depth:
+		if (pinned or err > subdivide_threshold) and node.depth < max_depth:
 			_try_split(node)
-	elif err < subdivide_threshold / merge_hysteresis:
+	elif not pinned and err < subdivide_threshold / merge_hysteresis:
 		_merge(node)
 	else:
 		for child in node.children:
 			_update_node(child, cam_pos, amp_m)
+
+
+## Does this patch cover any part of a streamed-in site? Compared as angles on
+## the unit sphere, so it is independent of spin and of the proxy scale.
+func _overlaps_resident_site(node: QuadNode) -> bool:
+	if _sites.is_empty():
+		return false
+	var dir: Vector3 = node.center.normalized()
+	# Half-diagonal of the patch, generously rounded up to a spherical cap.
+	var reach: float = PlanetPatchMesh.span_m(radius, node.depth) * 0.75 / radius
+	for state in _sites.values():
+		if not state.resident:
+			continue
+		if dir.angle_to(state.dir) < state.angular_radius + reach:
+			return true
+	return false
 
 
 ## Split only once all four children are built: the parent stays visible until
@@ -305,10 +377,15 @@ func _queue_build(face: int, depth: int, x: int, y: int) -> void:
 	var r := radius
 	var sd := skirt_drop
 	var commit: Callable = _commit_build
+	# High priority: patch geometry is the interactive path. WorkerThreadPool
+	# caps *low* priority tasks at a fraction of its threads, and the one-off
+	# texture bakes below are low priority and slow — leaving patch builds at the
+	# default put them in a queue behind fourteen bodies' worth of baking, which
+	# stalled refinement for seconds after bootstrap.
 	_task_ids.append(WorkerThreadPool.add_task(func() -> void:
 		var arrays := PlanetPatchMesh.build_arrays(srf, r, face, depth, x, y, sd)
 		commit.call_deferred(arrays, depth)
-	))
+	, true))
 
 
 func _commit_build(arrays: Dictionary, depth: int) -> void:
@@ -373,9 +450,15 @@ func _start_bake() -> void:
 	))
 
 
+## Authored rasters win over the bake wherever they exist: an equirect map that
+## already is the surface is strictly better than a palette's guess at it, and
+## PlanetBake skips producing what it would only be overwriting.
 func _commit_bake(images: Dictionary) -> void:
-	_material.set_shader_parameter(
-		"albedo_tex", ImageTexture.create_from_image(images["albedo"]))
+	if surface_res.authored_albedo != null:
+		_material.set_shader_parameter("albedo_tex", surface_res.authored_albedo)
+	else:
+		_material.set_shader_parameter(
+			"albedo_tex", ImageTexture.create_from_image(images["albedo"]))
 	_material.set_shader_parameter(
 		"normal_tex", ImageTexture.create_from_image(images["normal"]))
 	if surface_res.night_emissive != null:
@@ -388,6 +471,108 @@ func _commit_bake(images: Dictionary) -> void:
 	_material.set_shader_parameter("textures_ok", true)
 	textures_ready = true
 	textures_baked.emit()
+
+
+## --- Detail sites ---------------------------------------------------------------
+
+func _build_site_states() -> void:
+	var sampler := surface_res.make_sampler()
+	for site in surface_res.sites:
+		if site == null or site.id == &"":
+			continue
+		var state := SiteState.new()
+		state.site = site
+		state.dir = site.direction()
+		# Sit the anchor on the terrain, sea clamp included, so a coastal site is
+		# never left hanging over its own harbour.
+		state.local_pos = state.dir * (radius * (1.0 + sampler.height(state.dir)))
+		state.basis = Basis(site.east(), state.dir, site.north())
+		state.angular_radius = site.angular_radius(radius)
+		_sites[site.id] = state
+
+
+## World position of a site right now — spin included, since the anchor rides
+## this node's transform. Tests use it to check the tangent frame turns with the
+## planet.
+func site_transform(id: StringName) -> Transform3D:
+	var state: SiteState = _sites.get(id)
+	if state == null:
+		return Transform3D.IDENTITY
+	return global_transform * Transform3D(state.basis, state.local_pos)
+
+
+func site_resident(id: StringName) -> bool:
+	var state: SiteState = _sites.get(id)
+	return state != null and state.resident
+
+
+func resident_site_count() -> int:
+	var n: int = 0
+	for state in _sites.values():
+		if state.resident:
+			n += 1
+	return n
+
+
+## In under `site_enter_distance`, out over `site_exit_distance`, nothing in
+## between — the whole point of the gap is that hovering on the boundary is a
+## normal thing to do and must not cost a scene instantiation per tick.
+func _update_sites(eye: Vector3) -> void:
+	for state in _sites.values():
+		var dist: float = (site_transform(state.site.id).origin - eye).length()
+		if not state.resident and dist < site_enter_distance:
+			_instance_site(state)
+		elif state.resident and dist > site_exit_distance:
+			_release_site(state)
+
+
+func _instance_site(state: SiteState) -> void:
+	state.resident = true
+	var anchor := Node3D.new()
+	anchor.name = "Site_%s" % state.site.id
+	# Authored flat in local XZ with +Y up; this is the whole tangent-orientation
+	# contract from the design doc, and it is why authoring a site is ordinary
+	# scene work. The anchor is a child of this node, so spin carries it.
+	anchor.transform = Transform3D(state.basis, state.local_pos)
+	add_child(anchor)
+	state.anchor = anchor
+	if state.site.scene == null:
+		return
+	var inst := state.site.scene.instantiate()
+	# Configure before entering the tree: a site scene builds itself from the
+	# DetailSite, and building twice (once from _ready with defaults, once from
+	# here) is pure waste.
+	if inst.has_method("setup_site"):
+		inst.call("setup_site", state.site, radius)
+	anchor.add_child(inst)
+	_detach_site_physics(inst)
+
+
+## Site scenes are visual props. A physics body under this rail-driven node hits
+## the frozen-kinematic write-back problem: the server rewrites the body's global
+## transform one frame behind its moving parent and the local offset accumulates
+## without bound. Taking it out of the physics space leaves the tree as the only
+## owner of the transform — the same fix, and the same reason, as
+## DockingComputer._capture step 3b.
+func _detach_site_physics(root: Node) -> void:
+	for node in root.find_children("*", "PhysicsBody3D", true, false):
+		push_warning(
+			"DetailSite scene contains a physics body (%s); detached from the physics space. Site scenes should be visual props only."
+			% node.name)
+		PhysicsServer3D.body_set_space((node as PhysicsBody3D).get_rid(), RID())
+
+
+func _release_site(state: SiteState) -> void:
+	state.resident = false
+	if state.anchor != null and is_instance_valid(state.anchor):
+		state.anchor.queue_free()
+	state.anchor = null
+
+
+func _release_all_sites() -> void:
+	for state in _sites.values():
+		if state.resident:
+			_release_site(state)
 
 
 ## --- Skim collision -----------------------------------------------------------
@@ -490,7 +675,7 @@ func _queue_faces(entry: CacheEntry) -> void:
 	_task_ids.append(WorkerThreadPool.add_task(func() -> void:
 		var faces := PlanetPatchMesh.collision_faces(arrays)
 		commit.call_deferred(key, faces)
-	))
+	, true))
 
 
 func _commit_faces(key: String, faces: PackedVector3Array) -> void:
@@ -525,6 +710,7 @@ func stats() -> Dictionary:
 		"cache": _cache.size(),
 		"in_flight": _in_flight,
 		"colliders": _collider_nodes.size(),
+		"sites": resident_site_count(),
 	}
 
 

@@ -15,8 +15,15 @@ class_name SolarSystemData
 ## Surfaces (docs/planet-renderer.md): every body except the Sun carries a
 ## BodySurface — relief is exaggerated (~1–3% of radius) because true-scale
 ## relief would be invisible at this compression. Gas giants set amplitude 0
-## and get banded albedo; Earth gets a sea and coastal night lights. Spin
-## periods are dramatized like the orbits, roughly a 10x-orbit feel.
+## and get banded albedo. Spin periods are dramatized like the orbits, roughly a
+## 10x-orbit feel.
+##
+## Earth, the Moon and Mars are the three bodies we have real data for, so they
+## take authored equirect maps out of `assets/planets/` (cooked from NASA/NOAA/
+## USGS rasters by tools/cook_planet_maps.py) instead of the procedural base.
+## Everything else keeps the noise — the authored path is an override, not a
+## requirement, and a missing map degrades to a plausible invented world rather
+## than to a hole.
 
 const SUN_RADIUS: float = 20000.0
 const EARTH_RADIUS: float = 2000.0
@@ -55,14 +62,18 @@ static func build() -> Array[BodyDef]:
 	var earth := BodyDef.make(&"earth", "Earth", EARTH_RADIUS, &"sun",
 		300000.0, 14400.0, 0.0, 0.0, Color(0.22, 0.42, 0.62),
 		"Home lanes. Densest debris population in the system.")
-	# Sea at -0.3 puts the ocean shell ~12 m below the nominal radius: terrain
-	# genuinely dips under the analytic sphere, which is exactly what the skim
-	# collision swap exists for (and what planet_test's ocean check exercises).
-	earth.surface = _surf(&"earth", 1.3, 0.25, 0.02, -0.3, _grad([
+	# Sea level is 0.0 because the cook puts true mean sea level at exactly the
+	# encoding's zero — with real bathymetry this is a datum, not a knob. The
+	# tuned -0.3 it replaces only flooded the deepest procedural basins, which is
+	# why Earth's water used to read as scattered lakes.
+	earth.surface = _surf(&"earth", 1.3, 0.25, 0.02, 0.0, _grad([
 		[0.0, Color(0.76, 0.70, 0.50)], [0.08, Color(0.45, 0.58, 0.32)],
 		[0.35, Color(0.24, 0.42, 0.20)], [0.65, Color(0.45, 0.38, 0.28)],
 		[0.85, Color(0.56, 0.53, 0.49)], [1.0, Color(0.92, 0.93, 0.95)]]))
 	earth.surface.city_lights = true
+	_authored(earth.surface, "earth")
+	earth.surface.night_emissive = _map("earth_night")
+	earth.surface.sites = [_nyc()]
 	_spin(earth, 1800.0, 0.41)
 	bodies.append(earth)
 
@@ -72,6 +83,7 @@ static func build() -> Array[BodyDef]:
 	moon.surface = _surf(&"moon", 2.6, 0.65, 0.025, -1.0, _grad([
 		[0.0, Color(0.33, 0.32, 0.31)], [0.45, Color(0.55, 0.54, 0.52)],
 		[1.0, Color(0.78, 0.77, 0.75)]]))
+	_authored(moon.surface, "moon")
 	_spin(moon, 1800.0, 0.03)   # tidally locked: spin period = orbit period
 	bodies.append(moon)
 
@@ -81,6 +93,7 @@ static func build() -> Array[BodyDef]:
 	mars.surface = _surf(&"mars", 1.8, 0.6, 0.04, -1.0, _grad([
 		[0.0, Color(0.42, 0.22, 0.15)], [0.4, Color(0.72, 0.42, 0.30)],
 		[0.8, Color(0.85, 0.60, 0.45)], [1.0, Color(0.93, 0.84, 0.76)]]))
+	_authored(mars.surface, "mars")
 	_spin(mars, 1900.0, 0.44)
 	bodies.append(mars)
 
@@ -206,6 +219,37 @@ static func _banded(
 	s.band_frequency = band_frequency
 	s.band_wobble = wobble
 	return s
+
+
+## Committed coarse global maps (2048x1024 equirect, docs/assets.md §7). Missing
+## files are not an error: without them the body falls back to its procedural
+## parameters, which is the behaviour every other body already has.
+static func _authored(surface: BodySurface, body: String) -> void:
+	surface.authored_height = _map("%s_height" % body)
+	surface.authored_albedo = _map("%s_albedo" % body)
+
+
+static func _map(name: String) -> Texture2D:
+	var path := "res://assets/planets/%s.png" % name
+	if not ResourceLoader.exists(path):
+		push_warning("Planet map missing: %s (run tools/cook_planet_maps.py)" % path)
+		return null
+	return load(path) as Texture2D
+
+
+## The pilot detail site. 400 m of diorama standing in for New York — see
+## docs/planet-renderer.md, "Detail sites"; the inset is real terrain and the
+## buildings are miniatures, because true scale would put Manhattan inside a
+## 6 m smudge.
+static func _nyc() -> DetailSite:
+	var site := DetailSite.make(
+		&"nyc", "New York", 40.75, -73.98, 400.0,
+		"Eastern seaboard traffic control. Half the LEO launches you clean up after.")
+	site.height_inset = _map("nyc_height_inset")
+	site.night_emissive = _map("nyc_night")
+	if ResourceLoader.exists("res://scenes/sites/nyc.tscn"):
+		site.scene = load("res://scenes/sites/nyc.tscn") as PackedScene
+	return site
 
 
 static func _spin(def: BodyDef, period: float, tilt: float) -> void:

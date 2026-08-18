@@ -239,24 +239,93 @@ Two defects found and fixed while closing this gate, both worth remembering:
   did, it works, and the shots then show what the player would actually see.
 
 Remaining polish (not gate-blocking):
-- [ ] Earth's water reads as scattered lakes rather than oceans — `sea_level`
-  at -0.3 only floods the deepest basins. Real bathymetry in PR3 makes this a
-  data question rather than a tuning one, so it is best left until then.
+- [x] Earth's water reads as scattered lakes rather than oceans — `sea_level`
+  at -0.3 only floods the deepest basins. **Closed by PR3**: with ETOPO 2022
+  bathymetry the cook puts true mean sea level at the encoding's exact zero, so
+  `sea_level` is `0.0` and the coastline is a datum rather than a knob. The
+  decoded map's land fraction is 0.293 against a real 0.292.
 
-### PR3 — Detail sites + NYC pilot (scope set by owner 2026-08-17)
+### PR3 — Detail sites + NYC pilot — BUILT (scope set by owner 2026-08-17)
 
 Owner direction: seed from NASA / open GIS data at **coarse granularity**, add
 **NYC detail**, and **defer streaming and higher fidelity** ("later we can
 investigate ... if we even want it"). That makes this milestone smaller than
 originally designed — no fetch pipeline, no tiling, no server drop.
 
-- [ ] **Coarse global maps, committed.** 2048×1024 equirect height + albedo for Earth, Moon, Mars into `assets/planets/` (Earth: GEBCO/ETOPO1 + Blue Marble; Moon: LOLA + LROC WAC; Mars: MOLA + Viking mosaic). Un-ignore that path in `.gitignore` — these are static scientific rasters, a few MB, and committing them removes the asset-server write dependency entirely. **2k is a ceiling, not a placeholder**: at Earth's 2,000 m compressed radius one texel is ~6 m, already finer than a global map can usefully feed depth-7 geometry.
-- [ ] **Wire the authored path in `BodySurface`.** `authored_height`/`authored_albedo` already exist as fields; sample them *instead of* the noise when set (equirect lookup from the patch's sphere direction), with the procedural base as the automatic fallback so a missing map degrades to today's behaviour rather than breaking.
-- [ ] **Sea level from real bathymetry.** With ETOPO/GEBCO the ocean floor is real data, so Earth's `sea_level` becomes a lookup threshold rather than a tuned constant — check the coastline lands where it should before moving on. This is the gate on NYC being recognizable.
-- [ ] `scripts/world/detail_site.gd` per the design-doc schema (`lat_deg/lon_deg/footprint_m/height_inset/scene/night_emissive/nav_note`).
-- [ ] Site streamer in `PlanetSurface`: in at 3 km, out at 4 km (hysteresis); scene oriented to the sphere tangent at (lat,lon) and rotating with spin; inset height blended into overlapping patches with a smoothstep falloff over the footprint. NOTE: anything with a physics body parented under the rail-driven surface hits the frozen-kinematic write-back problem — see the docking note in architecture.md.
-- [ ] NYC pilot `scenes/sites/nyc.tscn` at 40.7 N, −74.0 W: add `POLYGON_SciFi_City` + `POLYGON_City` to `DEFAULT_PACKS` (now, not before), Manhattan grid from `SM_Bld_Background_*` at miniature scale (towers 25–40 m), harbour/rivers from the height inset, emissive street-grid night texture.
-- [ ] **PR3 gate**: all six suites green + a site stream-in/out test (in at 3 km, out at 4 km, no thrash at the boundary, correct tangent orientation as the planet spins); the money shot — NYC at night from 2 km with the terminator in frame. Owner review.
+- [x] **Coarse global maps, committed.** 2048×1024 equirect height + albedo for Earth, Moon, Mars into `assets/planets/`, cooked by `tools/cook_planet_maps.py`. All real public-domain data: Earth ETOPO 2022 + Blue Marble NG + Black Marble 2016; Moon LOLA LDEM + LROC WAC (NASA SVS CGI Moon Kit); Mars MOLA MEGDR + USGS Viking mosaic. `assets/planets/` was never in `.gitignore` (only `assets/meshes/` is), so nothing needed un-ignoring — an explicit note was added there instead so the exception is visible. Full source table and encoding in docs/assets.md §7.
+- [x] **Wire the authored path in `BodySurface`.** Sampled instead of the noise when set, bilinear, in exactly the shader's equirect convention. Procedural stays the automatic fallback: eleven of the fourteen surfaced bodies still use it.
+- [x] **Sea level from real bathymetry.** Earth's `sea_level` is now `0.0` — the cook puts mean sea level at the encoding's exact zero. `planet_test` re-derives the land fraction from the decoded map (0.293 vs 0.292) and spot-checks the Pacific, Atlantic, Sahara, Himalaya and New York, so orientation and decode are both pinned.
+- [x] `scripts/world/detail_site.gd` per the design-doc schema, plus `direction()` / `east()` / `north()` helpers so the tangent frame is defined in one place instead of at every call site.
+- [x] Site streamer in `PlanetSurface`: in at 3 km, out at 4 km; scene anchored to the sphere tangent and turning with spin (it hangs under the surface node, so spin is free); inset height blended with a smoothstep falloff that reaches zero at the footprint edge. Site scenes are visual props — the streamer detaches any physics body it finds from the physics space and warns, the DockingComputer `_capture` pattern.
+- [x] NYC pilot `scenes/sites/nyc.tscn` at 40.75 N, −73.98 W: `POLYGON_SciFi_City` + `POLYGON_City` added to `DEFAULT_PACKS`, ~68 buildings from `SM_Bld_Background_*` at native 18–42 m, placed from the inset's own land mask so the skyline lands on the real coastline; rivers and harbour from the inset; authored emissive street grid on Manhattan's 29° bearing.
+- [x] **PR3 gate**: all five suites green + the site stream-in/out test (in at 3 km, out at 4 km, 3.5 km neither acquires nor releases, right-handed tangent frame, antipodal after half a spin period); money shot `screenshots/25_nyc_night_2km.png`, plus 21–27.
+
+**Fixed / learned on the way through (PR3):**
+- **Frame-count settles are a lie in this harness.** Both `planet_test._settle_at`
+  and `capture_planet_shots._settle` waited a fixed number of frames. Headless
+  frames are sub-millisecond, so "400 frames" expired in well under a second —
+  faster than the worker pool could build anything — and the suite reported
+  `max_depth: 0` with four builds permanently in flight. Both now bound on wall
+  clock. Same class of bug as the PR2 "settle until depth stops changing" note.
+- **The camera rig has to be waited for, not the ship.** The error metric is a
+  *camera* metric and the rig follows on a 0.12 s half-life against the process
+  delta; four hold frames move it a couple of metres out of a several-kilometre
+  jump. Every settle now converges on the rig's own target. This was silently
+  under-reporting refinement (depth 2 where the metric asks for 6) and, worse,
+  made the site-streaming test read a stale decision — a resident site pins its
+  patch depth, so the leaf count stabilises even while the camera is still
+  hundreds of metres away.
+- **A pose captured once goes stale the moment the origin shifts.** Teleporting
+  the ship more than 10 km rebases the floating origin, so a render-space
+  position computed beforehand is off by exactly the shift. That is what pointed
+  the Moon and Mars frames at empty space. `_hold_pose` now takes a Callable and
+  recomputes every frame — which also fixes surface sites walking out of frame
+  as the planet spins during a 30 s settle.
+- **WorkerThreadPool caps low-priority tasks.** Patch builds were queued at the
+  default (low) priority behind fourteen bodies' worth of texture bakes and
+  starved for seconds after bootstrap. Patch and collision builds are now high
+  priority; the bakes stay low. `bake_size` also dropped to 768 (a bake costs
+  ~2.7 µs/texel in GDScript and they all run at once).
+- **Godot's PNG importer does not preserve 16-bit greyscale**, and one 8-bit
+  channel quantises Earth's ±40 m into 0.31 m terraces. Height is therefore
+  packed as red = high byte, green = low byte in an RGB8 PNG. It survives only
+  because these textures are read with `get_image()` and never assigned to a
+  material — otherwise the importer's detect-3d pass would VRAM-compress them
+  and shred the encoding. The land-fraction check in `planet_test` exists to
+  catch exactly that.
+- **`RenderingServer.global_shader_parameter_get` is editor-only** and logs an
+  error per call in a running game. The site needs the sun direction to gate its
+  own city lights on the terminator, so `SolarSystem` now mirrors the value into
+  a `static var sun_direction` beside the global uniform it already sets.
+- **The published Black Marble is a composite, not a radiance image**: warm
+  lights painted over a blue-purple land base whose luminance plateaus around
+  52/255. Using luminance as the mask set every continent glowing. Separating on
+  hue (`R - 0.6B`, which keeps the saturated white city cores that a plain
+  `R - B` would zero) gives a clean lights mask.
+- **The error metric alone cannot feed a detail site.** At the 2 km a site is
+  read from it stops at depth 3 — a 393 m patch, 12 m vertex spacing — against a
+  512² inset over a 400 m footprint. A resident site now pins its patches to
+  `site_min_depth` (6: 49 m patches, 1.5 m spacing). That takes a 2.6 km settle
+  to 429 leaves / 570 cache entries, so `cache_capacity` went 512 → 1024 for the
+  same measured reason it went 256 → 512 at PR2.
+- Framing a 400 m diorama is not the same problem as framing a planet: the rig
+  draws the ship dead centre, and near nadir the local up is nearly parallel to
+  the view axis, so "yaw the aim 26°" about it moves the target only 11° on
+  screen — still behind the hull. The offsets in `_frame_site` are built about
+  axes perpendicular to the view instead.
+- Known cosmetic: `xvfb-run` occasionally aborts at shutdown with
+  `8 RIDs of type "Texture" were leaked` (exit 134) *after* every screenshot has
+  been written. Not reproducible on every run and not gate-blocking.
+- **Pre-existing, not PR3: `travel_test`, `docking_test` and `eva_test` do not
+  self-terminate.** They print `PASS — all checks green` within seconds and then
+  sit at 0% CPU forever; `timeout` is what ends them, so the exit code is 124 no
+  matter how the checks went. `station_test` exits cleanly in 12 s and
+  `planet_test` in 127 s, so it is not the world build. Confirmed
+  pre-existing by stashing every PR3 change and running `travel_test` again —
+  identical behaviour, PASS at four seconds and then a stall to the timeout.
+  **Read the log for the PASS/FAIL line; do not read the exit code.** Worth
+  someone's afternoon eventually (a WorkerThreadPool or server finalize wait,
+  most likely), but it is not this milestone's bug.
 
 ### PR4 (stretch — owner call): atmosphere rim shell, clouds, geomorphing, more sites (Canaveral, Baikonur, Shanghai, Tycho, Olympus Mons).
 

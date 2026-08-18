@@ -38,11 +38,18 @@ DEST="assets/meshes"
 # POLYGON only — the art family is decided (docs/assets.md section 5). The
 # SIMPLE_Space* packs are deliberately absent: their flat, near-untextured look
 # does not sit in the same shot as POLYGON's panel detail.
+# POLYGON_SciFi_City / POLYGON_City joined at PR3 for the New York detail site
+# (docs/planet-renderer.md). SciFi_City is the one that matters: its
+# SM_Bld_Background_* meshes are purpose-built skyline filler — single-material,
+# a few hundred triangles, no interiors — which is exactly what a 400 m diorama
+# of Manhattan wants. POLYGON_City is the near-ground variety set, unused so far.
 DEFAULT_PACKS=(
 	POLYGON_Scifi_Space
 	POLYGON_SciFiWorlds
 	POLYGON_SciFi_Outpost_Map
 	POLYGON_Particle_FX
+	POLYGON_SciFi_City
+	POLYGON_City
 )
 
 # ── whole-pack mode ───────────────────────────────────────────────────────────

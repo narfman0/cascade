@@ -88,12 +88,19 @@ don't retype them.
 | `SIMPLE_CHR` | `assets/SIMPLE_Space_Characters_SourceFiles/SourceFiles/FBX/` |
 | `PFX` | `assets/POLYGON_Particle_FX_SourceFiles_v2/Source Files/FBX/` (spaces!) |
 | `SKIES` | `assets/_skies/` |
+| `CITY` | `assets/POLYGON_SciFi_City_SourceFiles_v5/Source_Files/FBX/` (`Source_Files`, with an underscore) |
 
 Packs surveyed and **rejected**: `POLYGON_SciFi_Outpost_Map_SourceFiles_v1` (a
-terrestrial map kit — grass clumps, fences, floodlights) and
-`POLYGON_SciFi_City_SourceFiles_v5` (cyberpunk street furniture). The only
-things in them Cascade could want — `SM_Prop_SatDish_01..03`,
-`SM_Prop_Vent_01..04` — exist in better form in the packs above.
+terrestrial map kit — grass clumps, fences, floodlights). The only things in it
+Cascade could want — `SM_Prop_SatDish_01..03`, `SM_Prop_Vent_01..04` — exist in
+better form in the packs above.
+
+`POLYGON_SciFi_City_SourceFiles_v5` was rejected at the same survey ("cyberpunk
+street furniture") and **re-admitted at PR3** for exactly one thing: its
+`SM_Bld_Background_*` skyline filler, which is the right shape for the New York
+detail site (§4.7). Nothing else in the pack is used. `POLYGON_City_SourceFiles_v5`
+joined `DEFAULT_PACKS` alongside it as the near-ground variety set and is so far
+unused.
 
 ---
 
@@ -380,6 +387,32 @@ asteroid work, not for Cascade's debris field).
 | Particle: debris shards | `PFX/FX_Shard_Rock_01..04.gltf` | — | Small fragments for a cut/break |
 | Particle atlas | `assets/POLYGON_Particle_FX_SourceFiles_v2/Source Files/Textures/PolygonParticles_Texture_01_A.png` | — | The only texture in the FX pack |
 
+### 4.7 New York detail site (PR3)
+
+`scripts/sites/nyc_site.gd` builds the Manhattan diorama in code from these, at
+**native scale** — Synty authored them 18–42 m tall, which lands inside the
+25–40 m miniature range `docs/planet-renderer.md` asks for with no rescaling.
+Heights below are world Y after the cook's `(rawX, rawZ, rawY) x 0.01`.
+
+| Purpose | Path | Height | Notes |
+|---|---|---|---|
+| Towers | `CITY/SM_Bld_Background_{Lrg_02,Lrg_03,Med_09}.gltf` | 42.0 / 42.5 / 30.4 m | The midtown/downtown core |
+| Blocks | `CITY/SM_Bld_Background_{Lrg_01,Med_01,Med_03,Med_04,Med_05,Med_06}.gltf` | 23.1–25.5 m | |
+| Low-rise | `CITY/SM_Bld_Background_{Med_02,Med_07,Med_08,Small_01,Small_02,Small_03}.gltf` | 4.9–23.1 m | Outer boroughs |
+
+**No textures needed.** The pack's MaterialList reports every one of these as
+`PolygonSciFi_Buildings_Background (No Albedo Texture)` — they are meant to be
+coloured by the scene, and `nyc_site.gd` applies one shared `StandardMaterial3D`
+(dark by day, faintly emissive across dusk) to all of them. That is also why
+`fetch_assets.sh` pulls no textures for this pack.
+
+Placement is not authored either: the script samples the site's own
+`nyc_height_inset.png` and puts buildings only where that raster says land, so
+the skyline sits on the real coastline and the Hudson, East River and Upper Bay
+stay dark. Fixed RNG seed — the diorama is identical every session.
+
+---
+
 **No combat FX.** The FX pack also contains `FX_Ammo_01`, `FX_Bullet_Trail*`,
 `FX_Grenade_0N`, `SM_GoreChunk_0N`, and the space pack has
 `SPACE_FX/SM_Laser_Trail_01`,
@@ -447,3 +480,77 @@ this manifest, already patched and imported with zero import errors under Godot
 4.7.1. It is gitignored and unreferenced by any scene, so a plain
 `./fetch_assets.sh` will report a 0-file closure and leave it alone. Delete the
 directory and re-run `--pack` any time you want a clean slate.
+
+---
+
+## 7. Planet maps (`assets/planets/`) — committed, not fetched
+
+These are the only binary art in the repo. Everything else comes from the asset
+server; a handful of static scientific rasters is not the same problem, and
+committing them removes the server write dependency and the whole fetch/cook
+path for data that will never change. ~19 MB total.
+
+Cooked by `tools/cook_planet_maps.py` (one-shot, not part of `fetch_assets.sh`).
+It downloads the sources into `/tmp/cascade_planet_raw` — about 1.4 GB, not
+committed — and writes the nine PNGs below. Re-run it only if a source is
+updated or an encoding constant changes.
+
+### 7.1 What is real, and what is not
+
+Every global map is real public-domain data. Everything is stated here so nobody
+has to guess later which is which.
+
+| File | Source | Real? |
+|---|---|---|
+| `earth_height.png` | NOAA NCEI **ETOPO 2022**, 60 arc-second surface elevation (topography + bathymetry), netCDF float32 21600×10800 | real |
+| `earth_albedo.png` | NASA Visible Earth **Blue Marble Next Generation** with topography and bathymetry, Dec 2004, 5400×2700 | real |
+| `earth_night.png` | NASA Earth Observatory **Black Marble 2016**, 0.1°, 3600×1800 | real |
+| `moon_height.png` | NASA SVS **CGI Moon Kit** (id 4720) — LRO **LOLA** LDEM at 16 px/deg, float32 km | real |
+| `moon_albedo.png` | NASA SVS CGI Moon Kit — **LROC WAC** colour mosaic with poles, already 2048×1024 | real |
+| `mars_height.png` | PDS **MGS MOLA MEGDR** 16 px/deg, MSB int16 metres | real |
+| `mars_albedo.png` | USGS Astrogeology **Viking** colourised global mosaic, 925 m/px | real |
+| `nyc_height_inset.png` | AWS Open Data **Terrain Tiles** (terrarium encoding; SRTM/NED composite), z12 mosaic over a 29 km window at 40.75 N 73.98 W | real |
+| `nyc_night.png` | **Authored art.** A street grid on Manhattan's ~29° bearing, masked by the land/water mask of the inset above. No public night raster resolves a 29 km window | **synthetic** |
+
+Exact URLs are in the `SOURCES` table at the top of the cook script.
+
+No other body has an authored map: the eleven remaining ones are procedural, and
+that is the designed fallback, not a gap (`BodySurface` samples the map only
+when one is set).
+
+### 7.2 Encoding — read this before touching a height map
+
+- **2048×1024 equirectangular**, column 0 = longitude −180°, row 0 = +90°
+  latitude. That is the game's own lookup: `lon = atan2(dir.z, dir.x)`,
+  `lat = asin(dir.y)`, `u = 0.5 + lon/TAU`, `v = 0.5 - lat/PI`, shared by
+  `BodySurface.HeightSampler._sample_equirect` and
+  `assets/shaders/planet_surface.gdshader`. MOLA ships starting at longitude 0
+  and is rolled half a turn by the cook; the SVS Moon maps and the USGS Viking
+  mosaic already start at −180.
+- **2048×1024 is a ceiling, not a placeholder** (owner decision, 2026-08-17).
+  At Earth's compressed 2,000 m radius one texel spans ~6 m of *rendered*
+  surface — finer than a global map can usefully feed even depth-7 geometry.
+- **Height carries 16 bits split across two 8-bit channels**: red is the high
+  byte, green the low byte, `p = (R*256 + G) / 65535`. Godot's PNG importer does
+  not preserve a true 16-bit greyscale PNG, and a single 8-bit channel would
+  quantise Earth's ±40 m of relief into 0.31 m terraces — coarser than the
+  0.77 m vertex spacing the geometry can express. Two channels give ~1 mm.
+- Height maps are read with `get_image()` and **never assigned to a material**,
+  so the importer's detect-3d VRAM compression — which would shred the split
+  encoding — never fires. `tests/planet_test.gd` re-derives Earth's land
+  fraction from the decoded map (0.293 against a real 0.292) and spot-checks the
+  Pacific, the Atlantic, the Sahara, the Himalaya and New York, so a broken
+  decode or a flipped orientation fails the suite rather than shipping.
+- `p` maps to the engine's normalized height `n = 2p - 1 ∈ [-1,1]`, the same
+  range the procedural noise produces, so `amplitude` and `sea_level` keep their
+  meanings. `n` is a **signed power** of true elevation,
+  `n = sign(e) · (|e| / ref_side)^0.6`, with separate positive/negative
+  reference elevations per body. The exponent is the design doc's "relief is
+  exaggerated" made concrete; the zero crossing is exact, which is what lets
+  Earth's `sea_level` simply be `0.0` — the coastline is the datum now, not a
+  tuned constant.
+- The NYC inset uses the same encoding with **local** reference elevations
+  (700 m up, 1500 m down) rather than the global ones. Its 29 km of real terrain
+  is squeezed into a 400 m footprint, so its vertical scale is stylized to match;
+  the blend weight reaches zero at the footprint edge, so the two encodings never
+  meet in a step.

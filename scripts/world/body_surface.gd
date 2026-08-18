@@ -8,7 +8,9 @@ class_name BodySurface extends Resource
 ## fancy albedo" as just another parameterization (docs/planet-renderer.md).
 ##
 ## Determinism matters: the noise seed is fixed per body, so the same body id
-## always produces bit-identical terrain — tests/planet_test.gd asserts it.
+## always produces bit-identical terrain — tests/planet_test.gd asserts it. The
+## authored path is deterministic for the same reason: it is a pure lookup into
+## a committed raster.
 
 ## Seed for every noise field. Derived from the body id by SolarSystemData so it
 ## is stable across sessions and platforms.
@@ -26,6 +28,10 @@ class_name BodySurface extends Resource
 
 ## Sea level as a normalized height in [-1, 1]. Terrain below it renders as a
 ## flat shell at the sea surface with a distinct albedo. -1.0 = no sea.
+##
+## With an authored height map this stops being a tuned constant: the cook puts
+## true mean sea level at exactly 0.0 (tools/cook_planet_maps.py), so Earth's
+## coastline is the datum rather than whichever value happened to look right.
 @export var sea_level: float = -1.0
 
 ## Land colours, sampled by normalized height above the sea (or above the
@@ -40,37 +46,88 @@ class_name BodySurface extends Resource
 ## How strongly noise wobbles the band boundaries (radians of latitude-ish).
 @export var band_wobble: float = 0.0
 
-## Bake emissive night lights clustered on coastal lowlands (Earth). Stands in
-## for the hand-painted blob mask until authored maps exist (PR3).
+## Bake emissive night lights clustered on coastal lowlands. The procedural
+## stand-in for `night_emissive`, used only when no authored mask is set.
 @export var city_lights: bool = false
 
 ## Authored equirect night-lights mask. Overrides the baked `city_lights` mask.
 @export var night_emissive: Texture2D
 
-## Authored equirect 16-bit height map. Used INSTEAD of noise when set.
+## Authored equirect height map, 16 bits split across the red (high byte) and
+## green (low byte) channels — see docs/assets.md §7. Used INSTEAD of the noise
+## when set; a missing map degrades to the procedural base rather than breaking.
 @export var authored_height: Texture2D
 
-## Authored equirect albedo. Used INSTEAD of the palette bake when set.
+## Authored equirect albedo, used directly as the surface texture INSTEAD of
+## baking one from `palette`.
 @export var authored_albedo: Texture2D
 
-var _authored_height_img: Image = null
+## Authored places on this surface (docs/planet-renderer.md, "Detail sites").
+@export var sites: Array[DetailSite] = []
+
+var _height_data: PackedByteArray
+var _height_w: int = 0
+var _height_h: int = 0
+var _site_insets: Array = []
 var _prepared: bool = false
 
 
-## Extract CPU-side images from authored textures. Main thread, once, before
-## any sampler is created on a worker (Texture2D.get_image is not thread-safe).
-func prepare() -> void:
+## Extract CPU-side pixel data from the authored textures and precompute the
+## site inset lookups. Main thread, once, before any sampler is created on a
+## worker: Texture2D.get_image() is not thread-safe, and neither is decoding.
+## `radius` is the body's radius in metres — a site's footprint is metres on the
+## sphere, so its angular extent is only knowable here.
+func prepare(radius: float) -> void:
 	if _prepared:
 		return
 	_prepared = true
-	if authored_height != null:
-		_authored_height_img = authored_height.get_image()
-		if _authored_height_img != null and _authored_height_img.is_compressed():
-			_authored_height_img.decompress()
+
+	var img := _cpu_image(authored_height)
+	if img != null:
+		_height_data = img.get_data()
+		_height_w = img.get_width()
+		_height_h = img.get_height()
+
+	for site in sites:
+		if site == null:
+			continue
+		var inset := _cpu_image(site.height_inset)
+		if inset == null:
+			continue
+		_site_insets.append({
+			"dir": site.direction(),
+			"east": site.east(),
+			"north": site.north(),
+			"radius_rad": site.angular_radius(radius),
+			"cos_limit": cos(minf(site.angular_radius(radius), PI)),
+			"data": inset.get_data(),
+			"w": inset.get_width(),
+			"h": inset.get_height(),
+		})
 
 
-func authored_height_image() -> Image:
-	return _authored_height_img
+## Decode a Texture2D to an uncompressed RGB8 Image, or null. VRAM-compressed
+## texture data would silently destroy the 16-bit split encoding, so this
+## refuses rather than returning garbage — tests/planet_test.gd checks the
+## decoded Earth map against the raster it was cooked from.
+func _cpu_image(tex: Texture2D) -> Image:
+	if tex == null:
+		return null
+	var img: Image = tex.get_image()
+	if img == null:
+		return null
+	if img.is_compressed():
+		push_warning(
+			"BodySurface: %s imported VRAM-compressed; height precision is lost."
+			% tex.resource_path)
+		img.decompress()
+	if img.get_format() != Image.FORMAT_RGB8:
+		img.convert(Image.FORMAT_RGB8)
+	return img
+
+
+func has_authored_height() -> bool:
+	return _height_w > 0
 
 
 ## A sampler owns its noise instances, so each worker task can create one and
@@ -86,13 +143,19 @@ class HeightSampler extends RefCounted:
 	var _mix: float
 	var _fbm := FastNoiseLite.new()
 	var _ridged := FastNoiseLite.new()
-	var _authored: Image = null
+	var _data: PackedByteArray
+	var _w: int = 0
+	var _h: int = 0
+	var _sites: Array = []
 
 	func _init(s: BodySurface) -> void:
 		amplitude = s.amplitude
 		sea_level = s.sea_level
 		_mix = clampf(s.ridged_mix, 0.0, 1.0)
-		_authored = s.authored_height_image()
+		_data = s._height_data
+		_w = s._height_w
+		_h = s._height_h
+		_sites = s._site_insets
 		_fbm.noise_type = FastNoiseLite.TYPE_SIMPLEX
 		_fbm.fractal_type = FastNoiseLite.FRACTAL_FBM
 		_fbm.fractal_octaves = 5
@@ -106,13 +169,16 @@ class HeightSampler extends RefCounted:
 
 	## Raw terrain height in [-1, 1] for a unit direction, before the sea clamp.
 	func height_normalized(dir: Vector3) -> float:
-		if _authored != null:
-			return _sample_equirect(dir) * 2.0 - 1.0
-		var n: float = _fbm.get_noise_3dv(dir)
-		if _mix > 0.0:
-			n = lerpf(n, _ridged.get_noise_3dv(dir), _mix)
-		# Simplex fBm rarely leaves ±0.6; stretch so the palette's ends get used.
-		return clampf(n * 1.6, -1.0, 1.0)
+		var n: float
+		if _w > 0:
+			n = _sample_equirect(dir) * 2.0 - 1.0
+		else:
+			n = _fbm.get_noise_3dv(dir)
+			if _mix > 0.0:
+				n = lerpf(n, _ridged.get_noise_3dv(dir), _mix)
+			# Simplex fBm rarely leaves ±0.6; stretch so the palette's ends get used.
+			n = clampf(n * 1.6, -1.0, 1.0)
+		return _blend_sites(dir, n)
 
 	## Displacement as a fraction of body radius, sea-clamped: below the sea the
 	## surface is the flat sea shell, so the ocean floor is never rendered.
@@ -125,11 +191,62 @@ class HeightSampler extends RefCounted:
 	func is_sea(dir: Vector3) -> bool:
 		return sea_level > -1.0 and height_normalized(dir) <= sea_level
 
+	## Site insets, blended over the global height with a smoothstep falloff
+	## across the footprint. Weight reaches zero exactly at the footprint edge,
+	## so a site never puts a step into the surrounding terrain no matter how
+	## differently its inset was encoded.
+	func _blend_sites(dir: Vector3, n: float) -> float:
+		for site in _sites:
+			var d: float = dir.dot(site["dir"])
+			if d <= site["cos_limit"]:
+				continue
+			var r: float = site["radius_rad"]
+			var t: float = acos(clampf(d, -1.0, 1.0)) / r
+			if t >= 1.0:
+				continue
+			var u: float = 0.5 + dir.dot(site["east"]) / (2.0 * r)
+			var v: float = 0.5 - dir.dot(site["north"]) / (2.0 * r)
+			var inset: float = _sample_split(
+				site["data"], site["w"], site["h"], u, v, false) * 2.0 - 1.0
+			n = lerpf(inset, n, smoothstep(0.0, 1.0, t))
+		return n
+
+	## Equirect lookup in exactly the shader's convention:
+	## lon = atan2(dir.z, dir.x), lat = asin(dir.y), u = 0.5 + lon/TAU,
+	## v = 0.5 - lat/PI. Any disagreement here shows up as a seam and as sites
+	## sitting off their own coastline.
 	func _sample_equirect(dir: Vector3) -> float:
 		var lon: float = atan2(dir.z, dir.x)
 		var lat: float = asin(clampf(dir.y, -1.0, 1.0))
-		var w: int = _authored.get_width()
-		var h: int = _authored.get_height()
-		var px: int = clampi(int((lon / TAU + 0.5) * float(w)), 0, w - 1)
-		var py: int = clampi(int((0.5 - lat / PI) * float(h)), 0, h - 1)
-		return _authored.get_pixel(px, py).r
+		return _sample_split(_data, _w, _h, lon / TAU + 0.5, 0.5 - lat / PI, true)
+
+	## Bilinear sample of a 16-bit height packed as red = high byte, green = low
+	## byte in an RGB8 image. Nearest-neighbour would terrace the surface: a
+	## depth-6 patch has 1.5 m vertex spacing against a 6 m global texel.
+	func _sample_split(
+		data: PackedByteArray, w: int, h: int, u: float, v: float, wrap_u: bool
+	) -> float:
+		var fx: float = u * float(w) - 0.5
+		var fy: float = clampf(v * float(h) - 0.5, 0.0, float(h - 1))
+		var x0: int = int(floor(fx))
+		var y0: int = int(floor(fy))
+		var tx: float = fx - float(x0)
+		var ty: float = fy - float(y0)
+		var x1: int = x0 + 1
+		var y1: int = mini(y0 + 1, h - 1)
+		if wrap_u:
+			x0 = posmod(x0, w)
+			x1 = posmod(x1, w)
+		else:
+			x0 = clampi(x0, 0, w - 1)
+			x1 = clampi(x1, 0, w - 1)
+		y0 = clampi(y0, 0, h - 1)
+		var a: float = _texel(data, w, x0, y0)
+		var b: float = _texel(data, w, x1, y0)
+		var c: float = _texel(data, w, x0, y1)
+		var e: float = _texel(data, w, x1, y1)
+		return lerpf(lerpf(a, b, tx), lerpf(c, e, tx), ty)
+
+	func _texel(data: PackedByteArray, w: int, x: int, y: int) -> float:
+		var i: int = (y * w + x) * 3
+		return (float(data[i]) * 256.0 + float(data[i + 1])) / 65535.0

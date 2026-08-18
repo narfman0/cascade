@@ -2,7 +2,7 @@
 
 Design for planets that gain detail as you approach: rough relief on **every**
 body in the system, and authored detail — buildings, city lights, recognizable
-places like New York — at select sites. Status: **designed, not built**. The
+places like New York — at select sites. Status: **PR1–PR3 built**; PR4 is the remaining stretch. The
 milestone breakdown is at the bottom and mirrored in docs/tasks.md.
 
 ## Goals
@@ -131,9 +131,16 @@ Layered, in order of precedence at any surface point:
 
    | Body | Height | Albedo |
    |---|---|---|
-   | Earth | GEBCO or ETOPO1 (topography + bathymetry, so the sea floor is real too) | NASA Blue Marble |
-   | Moon | LRO LOLA | LROC WAC mosaic |
-   | Mars | MGS MOLA | Viking / MDIM colour mosaic |
+   | Earth | NOAA **ETOPO 2022** 60 arc-sec surface elevation (topography + bathymetry, so the sea floor is real too) | NASA **Blue Marble NG** — plus **Black Marble 2016** as the night-lights map |
+   | Moon | **LRO LOLA** (via the NASA SVS CGI Moon Kit) | **LROC WAC** mosaic (same kit) |
+   | Mars | **MGS MOLA MEGDR** 16 px/deg | USGS **Viking** colourised global mosaic |
+
+   **Built at PR3, all real data.** Exact URLs, the 16-bit split-channel PNG
+   encoding, and the one authored (non-data) raster are documented in
+   docs/assets.md §7; the cook is `tools/cook_planet_maps.py`. Earth's
+   `sea_level` is now `0.0` because the cook puts true mean sea level at the
+   encoding's exact zero — the coastline is a datum rather than a tuned
+   constant, which is what stopped Earth's water reading as scattered lakes.
 
    **Coarse means 2048×1024, and that is a deliberate ceiling, not a placeholder.**
    At Earth's compressed radius of 2,000 m one texel spans ~6 m of surface —
@@ -236,7 +243,7 @@ during transfers makes planets visibly turn, for free, because spin derives from
 | `SolarSystemData` | per-body surface parameters (noise seeds, sea levels, palettes; Earth/Moon/Mars flagged for authored maps) |
 | `OriginShift` | no change — patches live under the body node, which already repositions from true space per frame |
 | Autopilot / nav console | no change; later, sites can appear as scan targets (`nav_note` hook) |
-| Asset server | new raw drop `CASCADE_Planets` (public-domain height/albedo maps, cooked to PNG pairs); city packs added to fetch defaults at PR3 |
+| Asset server | *no change*. The `CASCADE_Planets` drop was cancelled by the owner's coarse-and-committed decision; the maps live in `assets/planets/` in the repo. `POLYGON_SciFi_City` + `POLYGON_City` were added to `DEFAULT_PACKS` at PR3 |
 
 ## Performance budget
 
@@ -275,9 +282,11 @@ depth caps.
   Includes **skim collision**: trimesh colliders on near patches, the
   sphere-collider swap, and ship CCD in skim range — with a test that flies a
   scripted low pass and asserts no tunnelling and no invisible-sphere blocking.
-- **PR3 — Detail sites + NYC pilot.** `DetailSite` streaming, inset blending,
-  authored Earth/Moon/Mars maps cooked onto the asset server, Manhattan diorama
-  from POLYGON city packs, night-emissive street grid, screenshots.
+- **PR3 — Detail sites + NYC pilot. BUILT.** `DetailSite` streaming (in at 3 km,
+  out at 4 km), inset blending with a smoothstep falloff, coarse authored
+  Earth/Moon/Mars maps committed under `assets/planets/` (the asset-server drop
+  was dropped — see the note above), Manhattan diorama from
+  `POLYGON_SciFi_City`, night-emissive street grid, screenshots 21–27.
 - **PR4 (stretch).** Atmosphere rim shell, cloud layer, geomorphing, more sites.
 
 Ordering rationale: PR1 is the highest visible value per line of code (every
@@ -287,9 +296,11 @@ depends on both. Each PR is independently shippable and screenshot-reviewable.
 
 ## Open questions for the owner
 
-1. **Real-Earth maps:** green-light the `CASCADE_Planets` asset-server drop
-   (public-domain NASA data)? Without it Earth is plausible-but-fictional and
-   NYC sits on an invented coastline; the pilot loses its punch.
+1. ~~**Real-Earth maps:** green-light the `CASCADE_Planets` asset-server drop?~~
+   **Answered and shipped at PR3**, in a smaller form than proposed: coarse
+   (2048x1024) public-domain rasters committed to `assets/planets/`, no server
+   drop, no streaming. Earth, the Moon and Mars all carry real data; NYC sits on
+   the real coastline.
 2. **Site list beyond NYC:** natural candidates given the tone — Cape Canaveral,
    Baikonur, Shanghai lights, Tycho crater base (Moon), Olympus Mons survey
    station (Mars). Which matter enough to author?

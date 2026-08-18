@@ -16,6 +16,13 @@ const REFERENCE_INFLUENCE_SCALE: float = 30.0
 
 signal system_built
 
+## Unit vector from the render origin toward the Sun, refreshed every frame
+## beside the global shader parameter of the same value. Scene-side code (detail
+## sites gating their own city lights on the terminator) needs it too, and
+## RenderingServer.global_shader_parameter_get is editor-only — calling it in a
+## running game logs an error per call.
+static var sun_direction: Vector3 = Vector3(0.0, 0.0, 1.0)
+
 var bodies: Array[CelestialBody] = []
 
 ## Registered OrbitalStations. Not built here — stations are authored scenes,
@@ -110,6 +117,7 @@ func _aim_sun_light() -> void:
 	# The planet shader gates night lights on the same sun the light is aimed
 	# from: global parameter points from the render origin TOWARD the Sun.
 	RenderingServer.global_shader_parameter_set(&"planet_sun_direction", -dir)
+	sun_direction = -dir
 
 
 ## --- Queries -----------------------------------------------------------------

@@ -28,9 +28,12 @@ func _ready() -> void:
 	_ship = _world.get_node("Ship")
 
 	_test_surfaces_exist()
+	_test_authored_maps()
 	_test_patch_determinism()
 	_test_seam_agreement()
 	_test_spin_is_analytic()
+	_test_site_orientation()
+	await _test_site_streaming()
 	await _test_approach_refinement()
 	await _test_skim_collision()
 
@@ -71,6 +74,156 @@ func _test_surfaces_exist() -> void:
 	_check(_system.get_body(&"jupiter").def.surface.amplitude <= 0.0001,
 		"Jupiter is smooth (banded albedo, no relief)")
 	_check(_system.get_body(&"earth").def.spin_period > 0.0, "Earth spins")
+
+
+## --- PR3: authored maps -------------------------------------------------------
+
+## The committed maps are the milestone. This checks three things at once, all of
+## which have failed in obvious ways before: that Godot's importer did not
+## VRAM-compress the 16-bit split-channel height encoding into garbage, that the
+## raster is oriented in the game's equirect convention, and that it is real
+## Earth rather than something plausible-looking. A wrong orientation or a broken
+## decode both show up as a land fraction nowhere near 0.29.
+func _test_authored_maps() -> void:
+	print("\n== authored maps ==")
+	var earth := _system.get_body(&"earth")
+	var surface: BodySurface = earth.def.surface
+	_check(surface.authored_height != null, "Earth has an authored height map")
+	_check(surface.authored_albedo != null, "Earth has an authored albedo map")
+	_check(surface.night_emissive != null, "Earth has an authored night-lights map")
+	_check(surface.has_authored_height(),
+		"the height map decoded to usable CPU pixels")
+	_check(is_equal_approx(surface.sea_level, 0.0),
+		"sea level is the map's datum, not a tuned constant",
+		"(%.3f)" % surface.sea_level)
+
+	var sampler := surface.make_sampler()
+	# Area-weighted land fraction over a coarse grid. Real Earth is 0.292.
+	var land: float = 0.0
+	var total: float = 0.0
+	for iy in 90:
+		var lat: float = (float(iy) + 0.5) / 90.0 * PI - PI / 2.0
+		var weight: float = cos(lat)
+		for ix in 180:
+			var lon: float = (float(ix) + 0.5) / 180.0 * TAU - PI
+			var dir := Vector3(cos(lat) * cos(lon), sin(lat), cos(lat) * sin(lon))
+			total += weight
+			if not sampler.is_sea(dir):
+				land += weight
+	var fraction: float = land / total
+	_check(absf(fraction - 0.292) < 0.03, "land covers the right share of the globe",
+		"(%.3f vs 0.292)" % fraction)
+
+	# Orientation, spot-checked where getting it wrong is unmistakable.
+	_check(sampler.is_sea(_dir(0.0, -150.0)), "the mid-Pacific is ocean")
+	_check(sampler.is_sea(_dir(30.0, -40.0)), "the mid-Atlantic is ocean")
+	_check(not sampler.is_sea(_dir(23.0, 10.0)), "the Sahara is land")
+	_check(not sampler.is_sea(_dir(28.0, 87.0)), "the Himalaya is land")
+	_check(sampler.height_normalized(_dir(28.0, 87.0)) > 0.6,
+		"the Himalaya is the high ground",
+		"(%.2f)" % sampler.height_normalized(_dir(28.0, 87.0)))
+	_check(not sampler.is_sea(_dir(40.75, -73.98)),
+		"New York sits on land, not in its own harbour")
+
+
+func _dir(lat_deg: float, lon_deg: float) -> Vector3:
+	var lat: float = deg_to_rad(lat_deg)
+	var lon: float = deg_to_rad(lon_deg)
+	return Vector3(cos(lat) * cos(lon), sin(lat), cos(lat) * sin(lon))
+
+
+## --- PR3: detail sites --------------------------------------------------------
+
+## The anchor frame, checked as geometry rather than by eye: it must sit on the
+## surface, stand up along the local normal, and turn with the body. A site whose
+## frame is mirrored or whose up-axis is wrong builds a city lying on its side.
+func _test_site_orientation() -> void:
+	print("\n== site anchor ==")
+	var earth := _system.get_body(&"earth")
+	var surface := earth.planet_surface()
+	var site: DetailSite = earth.def.surface.sites[0]
+	_check(site.id == &"nyc", "Earth carries the New York site")
+	_check(site.scene != null, "the site has a scene to stream")
+	_check(site.height_inset != null, "the site has a height inset")
+
+	surface.update_spin(0.0)
+	var xf: Transform3D = surface.site_transform(&"nyc")
+	var centre: Vector3 = surface.global_position
+	var out: Vector3 = (xf.origin - centre).normalized()
+	_check(absf((xf.origin - centre).length() - earth.def.radius) < earth.def.radius * 0.05,
+		"the anchor sits on the surface",
+		"(%.1f m vs r=%.0f)" % [(xf.origin - centre).length(), earth.def.radius])
+	_check(xf.basis.y.normalized().dot(out) > 0.999,
+		"local +Y is the outward normal (the scene is authored flat)")
+	_check(absf(xf.basis.x.dot(xf.basis.y)) < 0.001
+			and absf(xf.basis.z.dot(xf.basis.y)) < 0.001,
+		"the tangent frame is orthogonal")
+	_check(xf.basis.x.cross(xf.basis.y).dot(xf.basis.z) > 0.999,
+		"the tangent frame is right-handed (a mirrored site mirrors its city)")
+
+	# The anchor is a child of the surface node, so spin carries it. Half a
+	# rotation must put it on the far side of the spin axis.
+	var axis := Vector3(
+		0.0, cos(earth.def.spin_axis_tilt), sin(earth.def.spin_axis_tilt)).normalized()
+	surface.update_spin(earth.def.spin_period * 0.5)
+	var half: Vector3 = surface.site_transform(&"nyc").origin - centre
+	var expected: Vector3 = out.rotated(axis, PI) * (xf.origin - centre).length()
+	_check((half - expected).length() < 1.0,
+		"half a spin period puts the site antipodal about the spin axis",
+		"(%.2f m off)" % (half - expected).length())
+	surface.update_spin(0.0)
+
+
+## In at 3 km, out at 4 km, and — the point of the gap — nothing happens in
+## between. Parking on the boundary is a normal thing for a player to do; a site
+## that streams on the same threshold it streams off would instantiate and free a
+## hundred buildings every evaluation tick.
+func _test_site_streaming() -> void:
+	print("\n== site streaming ==")
+	var earth := _system.get_body(&"earth")
+	var surface := earth.planet_surface()
+
+	await _settle_over_site(earth, 6000.0)
+	_check(not surface.site_resident(&"nyc"), "site is out at 6 km")
+
+	await _settle_over_site(earth, 2500.0)
+	_check(surface.site_resident(&"nyc"), "site streams in inside 3 km")
+	var anchor := surface.get_node_or_null("Site_nyc")
+	_check(anchor != null and anchor.get_child_count() > 0,
+		"the site scene is instantiated under the anchor")
+	if anchor != null:
+		var city := anchor.get_child(0)
+		var built: int = int(city.call("building_count")) if city.has_method(
+			"building_count") else 0
+		_check(built > 40, "the diorama placed a skyline", "(%d buildings)" % built)
+		_check(city.find_children("*", "PhysicsBody3D", true, false).is_empty(),
+			"the site scene carries no physics bodies")
+
+	# Hysteresis, both ways. From inside, 3.5 km must NOT release; from outside,
+	# 3.5 km must NOT acquire. Same distance, two different answers — that is
+	# what "no thrash at the boundary" means.
+	await _settle_over_site(earth, 3500.0)
+	_check(surface.site_resident(&"nyc"),
+		"3.5 km does not release a site that is already in")
+
+	await _settle_over_site(earth, 4500.0)
+	_check(not surface.site_resident(&"nyc"), "site streams out past 4 km")
+	_check(surface.get_node_or_null("Site_nyc") == null
+			or not is_instance_valid(surface.get_node_or_null("Site_nyc")),
+		"the anchor is released with it")
+
+	await _settle_over_site(earth, 3500.0)
+	_check(not surface.site_resident(&"nyc"),
+		"3.5 km does not acquire a site that is already out")
+
+	# And the pinned refinement follows the site rather than the camera.
+	await _settle_over_site(earth, 2500.0)
+	var stats: Dictionary = surface.stats()
+	_check(int(stats["max_depth"]) >= surface.site_min_depth,
+		"a resident site pins its patches to site_min_depth",
+		"(%d ≥ %d)" % [stats["max_depth"], surface.site_min_depth])
+	await _settle_over_site(earth, 6000.0)
+	_check(not surface.site_resident(&"nyc"), "site released on climb-out")
 
 
 ## --- PR2: patch geometry -----------------------------------------------------
@@ -288,27 +441,74 @@ func _settle_at(body: CelestialBody, distance: float) -> Dictionary:
 	var surface := body.planet_surface()
 	_ship.freeze = true
 	var dir := Vector3(0.0, 1.0, 0.2).normalized()
-	for _i in 4:
-		_ship.global_position = OriginShift.to_render(body.true_pos) + dir * distance
+	# Hold until the camera has caught up, not for a fixed number of frames: the
+	# rig smooths on a half-life against the process delta, and headless process
+	# frames are sub-millisecond, so four frames move it a couple of metres out of
+	# a several-kilometre jump. The error metric is a *camera* metric, so a
+	# lagging rig reports a far shallower tree than the distance actually asks for.
+	var cam := get_viewport().get_camera_3d()
+	var deadline: int = Time.get_ticks_msec() + 15000
+	while Time.get_ticks_msec() < deadline:
+		var where: Vector3 = OriginShift.to_render(body.true_pos) + dir * distance
+		_ship.global_position = where
 		await get_tree().physics_frame
-	# Settle until refinement *stops changing*, not until the first quiet moment.
-	# A split only commits once all four children have been built, so the queue
-	# empties between rounds and `is_quiescent()` goes true partway down the
-	# tree — waiting on it alone reports a far shallower surface than the metric
-	# actually asks for.
+		if cam == null or cam.global_position.distance_to(where) < 20.0:
+			break
+	return await _settle_surface(surface)
+
+
+## Park the ship `distance` metres from the New York site, looking down at it, and
+## let the surface settle. Distance is measured to the *site*, not to the body's
+## centre, because that is what the streamer's thresholds are measured against.
+## The site is re-read every hold frame: the planet is spinning underneath.
+func _settle_over_site(body: CelestialBody, distance: float) -> Dictionary:
+	var surface := body.planet_surface()
+	_ship.freeze = true
+	# Wait for the *camera* to arrive, not just the ship. The rig follows on a
+	# 0.12 s half-life against the process delta, and headless process frames are
+	# sub-millisecond, so a fixed number of hold frames leaves it hundreds of
+	# metres short — long enough to read a stale streaming decision, and a site
+	# pins its own patch depth so the leaf count settles even while the camera is
+	# still moving.
+	var cam := get_viewport().get_camera_3d()
+	var deadline: int = Time.get_ticks_msec() + 15000
+	while Time.get_ticks_msec() < deadline:
+		var xf: Transform3D = surface.site_transform(&"nyc")
+		var out: Vector3 = (xf.origin - surface.global_position).normalized()
+		_ship.global_position = xf.origin + out * distance
+		# Up is the site's local north: `out` is the negative of the look
+		# direction and would make look_at degenerate.
+		_ship.look_at(xf.origin, xf.basis.z)
+		await get_tree().physics_frame
+		if cam == null:
+			break
+		if absf((cam.global_position - xf.origin).length() - distance) < 20.0:
+			break
+	return await _settle_surface(surface)
+
+
+## Settle until refinement *stops changing*, not until the first quiet moment.
+## A split only commits once all four children have been built, so the queue
+## empties between rounds and `is_quiescent()` goes true partway down the tree —
+## waiting on it alone reports a far shallower surface than the metric asks for.
+##
+## Bounded by wall clock, not by a frame count. Headless frames are far faster
+## than the worker pool, so a frame budget that looks generous can expire in well
+## under a second and report a surface that simply has not been built yet.
+func _settle_surface(surface: PlanetSurface) -> Dictionary:
 	var previous := {}
 	var stable_rounds: int = 0
-	var guard: int = 0
-	while stable_rounds < 3 and guard < 400:
+	var deadline: int = Time.get_ticks_msec() + 30000
+	while stable_rounds < 3 and Time.get_ticks_msec() < deadline:
 		surface.force_evaluate()
 		await get_tree().process_frame
-		guard += 1
 		if not surface.is_quiescent():
 			stable_rounds = 0
 			continue
 		var now: Dictionary = surface.stats()
 		if previous.size() > 0 and now["leaves"] == previous["leaves"] \
-				and now["max_depth"] == previous["max_depth"]:
+				and now["max_depth"] == previous["max_depth"] \
+				and now["sites"] == previous["sites"]:
 			stable_rounds += 1
 		else:
 			stable_rounds = 0

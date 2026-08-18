@@ -9,6 +9,12 @@ export_presets.cfg
 # docs/assets.md) — the server is the source of truth, never commit the binaries.
 assets/meshes/
 
+# assets/planets/ is deliberately NOT ignored. Those nine PNGs (~19 MB) are the
+# committed coarse global height/albedo/night maps cooked from public NASA /
+# NOAA / USGS rasters by tools/cook_planet_maps.py. They never change, and
+# committing them removes the asset-server dependency for this data entirely.
+# See docs/assets.md section 7.
+
 # System / IDE
 .DS_Store
 *.swp

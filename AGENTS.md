@@ -19,6 +19,8 @@ cascade/
   resources/      # Godot Resource files (.tres, .res)
   assets/         # Art, audio, shaders
     meshes/       # gitignored — fetched from the asset server
+    planets/      # COMMITTED — coarse global height/albedo/night maps cooked
+                  #   from public NASA/NOAA/USGS rasters (docs/assets.md §7)
   tools/          # fetch/patch helpers (resolve_assets.py, patch_gltf_materials.py)
   fetch_assets.sh # sync cooked Synty meshes from the asset server
 ```
@@ -34,6 +36,12 @@ cascade/
 ./fetch_assets.sh --pack scifi_space  # whole-pack: browse before authoring
 godot --headless --import
 ```
+
+The one exception to "the server is the source of truth" is `assets/planets/`:
+nine static scientific rasters, committed, cooked once by
+`tools/cook_planet_maps.py`. Read `docs/assets.md` §7 before touching them — the
+height maps carry 16 bits split across two 8-bit channels and will silently
+break if they are ever assigned to a material.
 
 Read `docs/assets.md` before touching art. It has the curated manifest (player
 ship candidates, debris props, EVA suit, planets, stations, thruster FX) with
