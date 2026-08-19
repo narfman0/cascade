@@ -309,18 +309,81 @@ from orbit.
    scattering, and should ideally come from the same model near a body — noted
    as a stretch, not required for the gate.
 
-### Approach
+### Approach — precomputed multiple scattering (Hillaire 2020)
 
-Single-scattering, analytic, evaluated in a shader on a back-face sphere shell of
-radius `radius * (1 + atmosphere_height_fraction)`. Ray-march the view ray
-through the shell (16 steps, 4 light-samples per step as a starting point),
-accumulating Rayleigh + Mie in-scatter with Henyey-Greenstein phase for Mie.
+Owner direction 2026-08-19: use the most advanced modelling we can. This
+supersedes the earlier single-scattering call.
 
-Full Bruneton-style precomputed LUTs are deliberately **not** the tier here: at
-r = 2000 m compressed scale, with the coarse-data ceiling already accepted for
-heightmaps, single scattering is the honest match. If the twilight band or the
-sunset gradient looks wrong after tuning, revisit — do not pre-emptively build
-the LUT path.
+The target is **Hillaire's "A Scalable and Production Ready Sky and Atmosphere
+Rendering Technique" (2020)**, which is the current production standard and
+strictly better than the Bruneton 2008 4D LUT for our case — it includes
+multiple scattering at a fraction of the memory and rebuilds cheaply when
+parameters change (which matters: we have a dozen bodies, not one Earth).
+
+Four LUTs, all recomputed only when a body's parameters or the sun direction
+change materially:
+
+| LUT | Size | Contents |
+|---|---|---|
+| Transmittance | 256×64 | Optical depth from any altitude/zenith-angle to space. Analytic per texel |
+| Multi-scattering | 32×32 | Hillaire's dual-scattering approximation of orders 2..∞ |
+| Sky-view | 200×100 | The visible sky dome for the current camera altitude, non-linear latitude parameterization to keep horizon detail |
+| Aerial perspective | 32×32×32 froxels | In-scatter + transmittance through the camera frustum, for terrain seen through air |
+
+**Why multiple scattering is not optional here.** Single scattering makes
+twilight far too dark and the day sky under-saturated — most of the light
+reaching your eye from a clear sky has bounced more than once. Since the
+terminator is the region this project frames every screenshot on, getting orders
+2+ wrong would show up in exactly the shots that matter.
+
+### Physical model — what "accurate" includes beyond Rayleigh + Mie
+
+- **Ozone absorption.** The detail that separates accurate from approximate.
+  Earth's ozone layer (peak ~25 km, tent-shaped profile) absorbs in the Chappuis
+  band, ~500–700 nm. It is why twilight goes *deep blue* instead of muddy grey as
+  the sun drops — without it the sunset gradient is visibly wrong no matter how
+  good the scattering is. Modelled as a third extinction term with its own
+  altitude profile, zero scattering, pure absorption.
+- **Per-body phase functions.** Rayleigh's `(3/16π)(1+cos²θ)` for molecules;
+  Cornette-Shanks (a better-behaved Henyey-Greenstein) for aerosols. Mars dust is
+  coarser and more forward-scattering than terrestrial haze — that, plus the
+  absence of significant Rayleigh, is *why* Mars has blue sunsets and a
+  butterscotch day sky, the exact inverse of Earth. Titan wants a layered haze
+  with strong forward scatter.
+- **Planetary shadow in the atmosphere.** The night side's air is in the body's
+  own shadow; the shell must respect it, or the limb glows all the way round.
+- **Altitude-correct camera.** The sky-view LUT is parameterized on camera
+  altitude, so the same model serves orbit, low pass and skim without special
+  cases.
+- **Refraction** (stretch): near-horizon bending — the sun sits visibly above its
+  geometric position at sunrise. Physically real, cheap as a per-ray offset,
+  entirely optional.
+
+### The scale trap, and how to get it right
+
+Our Earth is 2,000 m, not 6,371 km. Do **not** plug real scale heights in
+metres — an 8.5 km Rayleigh scale height on a 2 km planet is an atmosphere four
+times taller than the world.
+
+**Preserve the ratios, not the absolutes.** What determines the look — twilight
+band width, limb arc thickness, how fast the sky reddens — is scale height over
+planet radius. Real Earth: 8.5 km / 6371 km ≈ 0.00133. Ours should be the same
+fraction of 2,000 m ≈ 2.7 m, with the dense shell at ~1–2% of radius. Get the
+ratio right and the compressed planet reads as a real one; get it wrong and it
+looks like a gas giant or a bare rock with a blue line.
+
+### Validating "accurate" against reality
+
+Advanced technique earns its keep only if the output is checkable, so the gate
+compares against published values rather than taste:
+
+- Zenith sky chromaticity at solar noon should land near CIE daylight D65.
+- The R/B ratio at the horizon should rise by roughly an order of magnitude
+  between sun elevation +10° and −2°.
+- Civil twilight (sun 0° to −6°) should still light the sky measurably; the band
+  width in degrees follows from scale height / radius and is directly assertable.
+- Mars: day sky redder than its sunset, sunset bluer than its day sky — the
+  inversion is the correctness test for the phase-function work.
 
 ### Per-body parameters (new `BodyAtmosphere` resource)
 
