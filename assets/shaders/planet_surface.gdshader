@@ -13,6 +13,12 @@ global uniform vec3 planet_sun_direction;
 // are stored relative to it (float32 discipline, docs/planet-renderer.md).
 instance uniform vec3 patch_center;
 
+// Geomorph factor (PR5): 0 = render this patch as its parent's surface
+// (CUSTOM0/CUSTOM1 carry the parent-level position and normal per vertex),
+// 1 = full own detail. PlanetSurface drives it from the same screen-space
+// error metric that decides splits, so LOD transitions never pop.
+instance uniform float morph_t : hint_range(0.0, 1.0) = 1.0;
+
 uniform sampler2D albedo_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform sampler2D normal_tex : hint_normal, filter_linear_mipmap, repeat_enable;
 uniform sampler2D emissive_tex : filter_linear_mipmap, repeat_enable;
@@ -41,6 +47,10 @@ uniform float limb_darkening = 0.0;
 varying vec3 v_sdir;
 
 void vertex() {
+	VERTEX = mix(CUSTOM0.xyz, VERTEX, morph_t);
+	NORMAL = normalize(mix(CUSTOM1.xyz, NORMAL, morph_t));
+	// Texture sampling follows the morphed geometry, so albedo and relief
+	// shading slide together instead of swimming against each other.
 	v_sdir = normalize(VERTEX + patch_center);
 }
 

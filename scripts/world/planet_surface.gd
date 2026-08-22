@@ -120,6 +120,7 @@ var _skim_ship: RigidBody3D = null
 var _collider_nodes: Dictionary = {}
 var _atmo_shell: MeshInstance3D = null
 var _atmo_material: ShaderMaterial = null
+var _cloud_layer: MeshInstance3D = null
 
 ## Per-site runtime state, keyed by DetailSite.id.
 var _sites: Dictionary = {}
@@ -297,6 +298,7 @@ func _update_node(node: QuadNode, cam_pos: Vector3, amp_m: float) -> void:
 	var err := _patch_error(node, cam_pos, amp_m)
 	var pinned := node.depth < site_min_depth and _overlaps_resident_site(node)
 	if node.children.is_empty():
+		_update_morph(node, err, pinned)
 		if (pinned or err > subdivide_threshold) and node.depth < max_depth:
 			_try_split(node)
 	elif not pinned and err < subdivide_threshold / merge_hysteresis:
@@ -304,6 +306,21 @@ func _update_node(node: QuadNode, cam_pos: Vector3, amp_m: float) -> void:
 	else:
 		for child in node.children:
 			_update_node(child, cam_pos, amp_m)
+
+
+## Geomorph factor (PR5): 0 renders the patch as its parent's surface, 1 as
+## its own. A patch splits into children when err reaches the threshold, so
+## children arrive at err ~ threshold/2 — morph 0, identical to the parent
+## they replace — and reach full detail by 0.75x threshold on approach. The
+## merge hysteresis sits below the morph-0 point, so coarsening is a swap
+## between two identical renderings too. Site-pinned patches skip morphing:
+## their insets need the full-detail surface regardless of the error metric.
+func _update_morph(node: QuadNode, err: float, pinned: bool) -> void:
+	if node.mi == null or node.depth == 0:
+		return
+	var m: float = 1.0 if pinned \
+		else clampf((err / subdivide_threshold - 0.5) * 4.0, 0.0, 1.0)
+	node.mi.set_instance_shader_parameter(&"morph_t", m)
 
 
 ## Does this patch cover any part of a streamed-in site? Compared as angles on
@@ -369,6 +386,9 @@ func _attach_mesh(node: QuadNode, entry: CacheEntry) -> void:
 	mi.position = node.center
 	mi.material_override = _material
 	mi.set_instance_shader_parameter(&"patch_center", node.center)
+	# A freshly attached patch renders as its parent did (morph 0) and morphs
+	# in as the camera closes; roots have no parent level to morph from.
+	mi.set_instance_shader_parameter(&"morph_t", 1.0 if node.depth == 0 else 0.0)
 	add_child(mi)
 	node.mi = mi
 
@@ -424,8 +444,14 @@ func _store_entry(arrays: Dictionary, depth: int) -> CacheEntry:
 	mesh_arrays[Mesh.ARRAY_VERTEX] = arrays["verts"]
 	mesh_arrays[Mesh.ARRAY_NORMAL] = arrays["normals"]
 	mesh_arrays[Mesh.ARRAY_INDEX] = arrays["indices"]
+	# Geomorph targets ride along as custom attributes (PR5).
+	mesh_arrays[Mesh.ARRAY_CUSTOM0] = arrays["parent_pos"]
+	mesh_arrays[Mesh.ARRAY_CUSTOM1] = arrays["parent_nrm"]
+	var flags: int = \
+		(Mesh.ARRAY_CUSTOM_RGB_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT) \
+		| (Mesh.ARRAY_CUSTOM_RGB_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM1_SHIFT)
 	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh_arrays)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh_arrays, [], {}, flags)
 	var entry := CacheEntry.new()
 	entry.key = arrays["key"]
 	entry.depth = depth
@@ -547,6 +573,35 @@ static func _lut_texture(lut: Dictionary) -> ImageTexture:
 ## The shell node, or null for an airless body. Tests assert both ways.
 func atmosphere_shell() -> MeshInstance3D:
 	return _atmo_shell
+
+
+## Build the translucent cloud deck (PR5). Called by CelestialBody after
+## setup for bodies whose BodyDef asks for one; hangs under this node so spin
+## and the proxy scale carry it exactly like the shell.
+func configure_clouds(height_fraction: float, coverage: float) -> void:
+	var sphere := SphereMesh.new()
+	sphere.radius = 1.0
+	sphere.height = 2.0
+	sphere.radial_segments = 96
+	sphere.rings = 48
+
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://assets/shaders/cloud_layer.gdshader")
+	mat.set_shader_parameter("coverage", coverage)
+	# Below the atmosphere shell (-15): haze composites over the clouds.
+	mat.render_priority = -16
+
+	_cloud_layer = MeshInstance3D.new()
+	_cloud_layer.name = "CloudLayer"
+	_cloud_layer.mesh = sphere
+	_cloud_layer.material_override = mat
+	_cloud_layer.scale = Vector3.ONE * (radius * (1.0 + height_fraction))
+	_cloud_layer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_cloud_layer)
+
+
+func cloud_layer() -> MeshInstance3D:
+	return _cloud_layer
 
 
 ## The shared surface material (tests inspect the night-gate uniforms).

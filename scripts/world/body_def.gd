@@ -55,6 +55,13 @@ class_name BodyDef
 ## their visible "surface" already is atmosphere. 0 disables.
 @export var limb_darkening: float = 0.0
 
+## Translucent procedural cloud deck above the terrain (PR5). Height is a
+## fraction of radius — real Earth cloud tops ~12 km / 6371 km, exaggerated a
+## touch so the deck clears most relief.
+@export var cloud_layer: bool = false
+@export var cloud_height_fraction: float = 0.012
+@export var cloud_coverage: float = 0.5
+
 ## Simulation seconds per rotation, dramatized like orbital periods. 0 = none.
 @export var spin_period: float = 0.0
 

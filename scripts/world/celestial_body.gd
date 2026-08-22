@@ -36,6 +36,7 @@ var _static_body: StaticBody3D
 var _collision: CollisionShape3D
 var _rings: MeshInstance3D
 var _surface: PlanetSurface
+var _glare: MeshInstance3D
 
 
 func setup(p_def: BodyDef) -> void:
@@ -55,6 +56,8 @@ func _build_visuals() -> void:
 			def.surface, def.radius, def.spin_period, def.spin_axis_tilt,
 			def.albedo, def.roughness, def.atmosphere, def.limb_darkening
 		)
+		if def.cloud_layer:
+			_surface.configure_clouds(def.cloud_height_fraction, def.cloud_coverage)
 		add_child(_surface)
 	else:
 		_build_sphere_visual()
@@ -99,15 +102,36 @@ func _build_sphere_visual() -> void:
 	sphere.radial_segments = 64
 	sphere.rings = 32
 
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = def.albedo
-	mat.roughness = def.roughness
-	mat.metallic = 0.0
+	var mat: Material
 	if def.emissive:
-		mat.emission_enabled = true
-		mat.emission = def.albedo
-		mat.emission_energy_multiplier = def.emission_energy
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		# A limb-darkened disc bright enough to bloom, plus an additive
+		# billboard glare — the Sun reads as a star, not a cream sticker.
+		var disc := ShaderMaterial.new()
+		disc.shader = load("res://assets/shaders/sun_disc.gdshader")
+		disc.set_shader_parameter("tint", Vector3(def.albedo.r, def.albedo.g, def.albedo.b))
+		disc.set_shader_parameter("core_energy", def.emission_energy * 2.2)
+		disc.set_shader_parameter("edge_energy", def.emission_energy * 0.5)
+		mat = disc
+
+		var glare_mat := ShaderMaterial.new()
+		glare_mat.shader = load("res://assets/shaders/sun_glare.gdshader")
+		glare_mat.render_priority = -20
+		var quad := QuadMesh.new()
+		quad.size = Vector2(2.0, 2.0)
+		_glare = MeshInstance3D.new()
+		_glare.name = "Glare"
+		_glare.mesh = quad
+		_glare.material_override = glare_mat
+		_glare.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_glare.scale = Vector3.ONE * (def.radius * 4.0)
+		_glare.extra_cull_margin = def.radius * 4.0
+		add_child(_glare)
+	else:
+		var std := StandardMaterial3D.new()
+		std.albedo_color = def.albedo
+		std.roughness = def.roughness
+		std.metallic = 0.0
+		mat = std
 
 	_mesh = MeshInstance3D.new()
 	_mesh.name = "Mesh"
@@ -193,6 +217,8 @@ func _apply_scale(ratio: float) -> void:
 		_surface.apply_scale_ratio(ratio)
 	if _rings:
 		_rings.scale = Vector3(r, r * 0.02, r)
+	if _glare:
+		_glare.scale = Vector3.ONE * (r * 4.0)
 	if _collision and not _collision.disabled:
 		# Collision only runs un-proxied, so the true radius is correct there.
 		(_collision.shape as SphereShape3D).radius = def.radius

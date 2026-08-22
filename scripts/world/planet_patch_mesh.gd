@@ -97,6 +97,41 @@ static func build_arrays(
 				nrm = -nrm
 			normals[j * n + i] = nrm
 
+	# Geomorph targets (PR5): every vertex's position and normal on the PARENT
+	# depth's rendered surface. Even-indexed vertices sample the same sphere
+	# point as a parent vertex, so their target is their own position; odd ones
+	# sit on the parent's linear interpolation — edge midpoints, and for the
+	# odd/odd quad centre the midpoint of the ANTI-diagonal, because that is
+	# the edge the parent's two triangles actually share. The surface shader
+	# lerps toward these by a per-patch morph factor, so a freshly split patch
+	# renders exactly as its parent did and refinement never pops.
+	var pverts := PackedVector3Array()
+	var pnorms := PackedVector3Array()
+	pverts.resize(n * n)
+	pnorms.resize(n * n)
+	if depth == 0:
+		for k in n * n:
+			pverts[k] = verts[k]
+			pnorms[k] = normals[k]
+	else:
+		for j in n:
+			for i in n:
+				var idx: int = j * n + i
+				var odd_i: bool = (i & 1) == 1
+				var odd_j: bool = (j & 1) == 1
+				if not odd_i and not odd_j:
+					pverts[idx] = verts[idx]
+					pnorms[idx] = normals[idx]
+				elif odd_i and not odd_j:
+					pverts[idx] = (verts[idx - 1] + verts[idx + 1]) * 0.5
+					pnorms[idx] = (normals[idx - 1] + normals[idx + 1]).normalized()
+				elif not odd_i:
+					pverts[idx] = (verts[idx - n] + verts[idx + n]) * 0.5
+					pnorms[idx] = (normals[idx - n] + normals[idx + n]).normalized()
+				else:
+					pverts[idx] = (verts[idx - n + 1] + verts[idx + n - 1]) * 0.5
+					pnorms[idx] = (normals[idx - n + 1] + normals[idx + n - 1]).normalized()
+
 	var indices := PackedInt32Array()
 	for j in GRID:
 		for i in GRID:
@@ -132,8 +167,13 @@ static func build_arrays(
 		for k in n:
 			var gi: int = start + k * step
 			var p: Vector3 = verts[gi] + center
-			verts.append(verts[gi] - p.normalized() * drop)
+			var fall: Vector3 = p.normalized() * drop
+			verts.append(verts[gi] - fall)
 			normals.append(normals[gi])
+			# Skirts morph with the edge they hang from, or they would tear
+			# open exactly during the transition they exist to hide.
+			pverts.append(pverts[gi] - fall)
+			pnorms.append(pnorms[gi])
 		for k in GRID:
 			var s0: int = base + k
 			var s1: int = base + k + 1
@@ -161,7 +201,21 @@ static func build_arrays(
 		"grid_index_count": grid_index_count,
 		"center": center,
 		"key": patch_key(face, depth, x, y),
+		"parent_pos": _flatten(pverts),
+		"parent_nrm": _flatten(pnorms),
 	}
+
+
+## CUSTOM mesh arrays take flat floats, not Vector3s.
+static func _flatten(v: PackedVector3Array) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	out.resize(v.size() * 3)
+	for i in v.size():
+		var p: Vector3 = v[i]
+		out[i * 3] = p.x
+		out[i * 3 + 1] = p.y
+		out[i * 3 + 2] = p.z
+	return out
 
 
 ## Flattened triangle list for a ConcavePolygonShape3D, patch-center relative.

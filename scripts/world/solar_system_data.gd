@@ -76,6 +76,8 @@ static func build() -> Array[BodyDef]:
 	earth.surface.night_emissive = _map("earth_night")
 	earth.surface.sites = [_nyc()]
 	earth.atmosphere = BodyAtmosphere.earth()
+	earth.cloud_layer = true
+	earth.cloud_coverage = 0.48
 	_spin(earth, 1800.0, 0.41)
 	bodies.append(earth)
 

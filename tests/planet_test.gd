@@ -31,6 +31,7 @@ func _ready() -> void:
 	_test_authored_maps()
 	_test_patch_determinism()
 	_test_seam_agreement()
+	_test_geomorph_targets()
 	_test_spin_is_analytic()
 	_test_site_orientation()
 	await _test_site_streaming()
@@ -294,6 +295,50 @@ func _test_seam_agreement() -> void:
 
 ## Spin must be a function of sim_time, never accumulated — otherwise time
 ## compression desynchronises the surface from the orbit.
+## Geomorph targets (PR5): CUSTOM0/1 must carry the parent-level surface —
+## even vertices coincide with parent vertices exactly, odd ones sit on the
+## parent's linear interpolation. If either drifts, LOD transitions pop, which
+## is precisely what geomorphing exists to remove.
+func _test_geomorph_targets() -> void:
+	print("\n== geomorph targets ==")
+	var surface := _system.get_body(&"earth").planet_surface()
+	var arrays: Dictionary = _build(surface, 0, 3, 2, 5)
+	var verts: PackedVector3Array = arrays["verts"]
+	var ppos: PackedFloat32Array = arrays["parent_pos"]
+	_check(ppos.size() == verts.size() * 3,
+		"parent targets cover every vertex, skirts included")
+
+	var n: int = PlanetPatchMesh.GRID + 1
+	var even_exact := true
+	var odd_mid := true
+	for j in range(0, n, 2):
+		for i in range(0, n, 2):
+			var idx: int = j * n + i
+			var pv := Vector3(ppos[idx * 3], ppos[idx * 3 + 1], ppos[idx * 3 + 2])
+			if (pv - verts[idx]).length() > 0.001:
+				even_exact = false
+	for j in range(0, n, 2):
+		for i in range(1, n, 2):
+			var idx: int = j * n + i
+			var pv := Vector3(ppos[idx * 3], ppos[idx * 3 + 1], ppos[idx * 3 + 2])
+			var mid: Vector3 = (verts[idx - 1] + verts[idx + 1]) * 0.5
+			if (pv - mid).length() > 0.001:
+				odd_mid = false
+	_check(even_exact, "even vertices coincide with the parent's")
+	_check(odd_mid, "odd vertices sit on the parent's edge midpoints")
+
+	# Root patches have no coarser level: their target is themselves.
+	var root: Dictionary = _build(surface, 0, 0, 0, 0)
+	var rverts: PackedVector3Array = root["verts"]
+	var rpos: PackedFloat32Array = root["parent_pos"]
+	var self_target := true
+	for k in rverts.size():
+		var pv := Vector3(rpos[k * 3], rpos[k * 3 + 1], rpos[k * 3 + 2])
+		if (pv - rverts[k]).length() > 0.001:
+			self_target = false
+	_check(self_target, "root patches morph to themselves")
+
+
 func _test_spin_is_analytic() -> void:
 	print("\n== spin ==")
 	var earth := _system.get_body(&"earth")

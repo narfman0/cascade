@@ -443,7 +443,12 @@ atmosphere everywhere and quietly destroying it.
   per-pixel shell march with planetary shadow and depth-clamped aerial
   perspective, per-channel Cornette-Shanks (the Mars inversion), ozone,
   derived twilight driving the city-light gate, sky-derived ambient fill.
-  Clouds, geomorphing and more sites remain PR5.
+- **PR5 — clouds + geomorphing + sun glare. BUILT** (2026-08-22, see
+  docs/tasks.md): procedural lit cloud deck under the atmosphere shell,
+  per-vertex parent-surface geomorph targets with an error-driven morph
+  factor (LOD transitions no longer pop geometry), limb-darkened blooming
+  sun disc with an occlusion-correct billboard glare. More detail sites
+  remain the open item.
 
 Ordering rationale: PR1 is the highest visible value per line of code (every
 destination in the nav console improves at once, and city lights land), PR2 is

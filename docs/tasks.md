@@ -365,7 +365,12 @@ the lighting behaviour is the requirement, not a coloured rim.
 - [x] Proxy: shell tracks the drawn radius exactly, proxied (Mars) and near (Earth).
 - [x] Screenshots 28–34: Earth limb arc, sunset from low orbit, soft-vs-hard terminator pair (Earth beside Moon), Mars, Titan, Venus, skim aerial perspective — `tests/capture_planet_shots.gd`.
 
-### PR5 (stretch — owner call): clouds, geomorphing, more detail sites (Canaveral, Baikonur, Shanghai, Tycho, Olympus Mons).
+### PR5 — clouds, geomorphing, sun glare (owner-approved 2026-08-22) — BUILT except sites
+
+- [x] **Cloud deck** — `assets/shaders/cloud_layer.gdshader` + `PlanetSurface.configure_clouds()`: translucent sphere at `BodyDef.cloud_height_fraction` (Earth 0.012, coverage 0.48), seamless value-noise fbm over the sphere direction, lit by the scene sun so the terminator crosses clouds and ground together, TIME-drifting weather relative to the spin. Draws under the atmosphere shell (`render_priority` −16 vs −15) so limb haze and twilight composite over it; depth testing clips the sheet around relief taller than the deck. No cloud shadows on the ground yet — noted, not hidden.
+- [x] **Geomorphing** — `PlanetPatchMesh.build_arrays` now emits per-vertex parent-surface position/normal (CUSTOM0/1: even vertices coincide with parent vertices, odd ones sit on the parent's interpolation — quad centres on the ANTI-diagonal, the edge the parent's triangles actually share; skirts morph with their edge). The surface shader lerps by a per-patch `morph_t` instance uniform driven from the same screen-space error that decides splits: children arrive rendering exactly as the parent they replace and reach full detail by 0.75× threshold. Site-pinned patches stay at morph 1. Gate: `planet_test` "geomorph targets" — even-exact, odd-midpoint, roots self-target.
+- [x] **Sun glare** — `sun_disc.gdshader` (limb-darkened disc pushed past the tonemap white so glow blooms it) + `sun_glare.gdshader` (additive billboard halo, depth-tested so planets occlude it per-pixel, pulled camera-ward past the disc so the Sun cannot occlude its own glare). Replaces the flat cream circle.
+- [ ] More detail sites (Canaveral, Baikonur, Shanghai, Tycho, Olympus Mons) — still owner's call on which matter.
 
 ## Track SD — Stations and Docking (SD1 + SD2 COMPLETE — SD3 remains stretch)
 
