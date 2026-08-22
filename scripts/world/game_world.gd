@@ -108,3 +108,10 @@ func _wire_systems() -> void:
 	var hud := get_node_or_null("HUD")
 	if hud and hud.has_method("bind_world"):
 		hud.bind_world(_system, autopilot)
+
+	# Hand the environment to the solar system so ambient fill near an
+	# atmospheric body derives from its sky instead of the old flat constant
+	# (PR4 stretch). The system reads the initial values as the deep-space base.
+	var world_env := get_node_or_null("Environment/WorldEnvironment") as WorldEnvironment
+	if world_env:
+		_system.bind_environment(world_env.environment)

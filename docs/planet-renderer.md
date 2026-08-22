@@ -273,7 +273,15 @@ depth caps.
 - plus `capture_shots.gd` additions: Earth full disc (A), limb at 30 km (B),
   NYC at night from 2 km (C) — the money shot for review
 
-## Atmosphere and scattering (PR4 — designed, not built)
+## Atmosphere and scattering (PR4 — BUILT)
+
+Status 2026-08-22: implemented and gated by `tests/atmosphere_test.gd`; see
+docs/tasks.md PR4 for per-item notes. One deliberate deviation from the plan
+below: the sky-view and froxel LUTs are replaced by a per-pixel march in the
+shell shader that consumes the baked transmittance and multi-scatter LUTs —
+at this scale the march is cheap, and clamping it against the live depth
+buffer is the aerial perspective with nothing to rebuild when the sun or
+camera moves.
 
 Owner direction, 2026-08-18: atmosphere on all planets, **with special attention
 to accurate lighting**. The lighting is the substance here; a coloured rim shell
@@ -430,7 +438,12 @@ atmosphere everywhere and quietly destroying it.
   Earth/Moon/Mars maps committed under `assets/planets/` (the asset-server drop
   was dropped — see the note above), Manhattan diorama from
   `POLYGON_SciFi_City`, night-emissive street grid, screenshots 21–27.
-- **PR4 (stretch).** Atmosphere rim shell, cloud layer, geomorphing, more sites.
+- **PR4 — Atmosphere and scattering. BUILT.** Hillaire-2020 precomputed
+  multiple scattering (transmittance + ψ_ms LUTs per body, worker-baked),
+  per-pixel shell march with planetary shadow and depth-clamped aerial
+  perspective, per-channel Cornette-Shanks (the Mars inversion), ozone,
+  derived twilight driving the city-light gate, sky-derived ambient fill.
+  Clouds, geomorphing and more sites remain PR5.
 
 Ordering rationale: PR1 is the highest visible value per line of code (every
 destination in the nav console improves at once, and city lights land), PR2 is

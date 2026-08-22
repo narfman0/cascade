@@ -53,7 +53,7 @@ func _build_visuals() -> void:
 		_surface.name = "PlanetSurface"
 		_surface.setup(
 			def.surface, def.radius, def.spin_period, def.spin_axis_tilt,
-			def.albedo, def.roughness
+			def.albedo, def.roughness, def.atmosphere, def.limb_darkening
 		)
 		add_child(_surface)
 	else:

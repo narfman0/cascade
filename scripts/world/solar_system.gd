@@ -32,6 +32,9 @@ var stations: Array[OrbitalStation] = []
 var _by_id: Dictionary = {}
 var _sun_light: DirectionalLight3D
 var _sun: CelestialBody
+var _environment: Environment = null
+var _ambient_base_color: Color
+var _ambient_base_energy: float = 1.1
 
 
 func _ready() -> void:
@@ -96,6 +99,7 @@ func _update_bodies() -> void:
 	for station in stations:
 		station.update_render(t)
 	_aim_sun_light()
+	_update_ambient()
 
 
 func _aim_sun_light() -> void:
@@ -118,6 +122,52 @@ func _aim_sun_light() -> void:
 	# from: global parameter points from the render origin TOWARD the Sun.
 	RenderingServer.global_shader_parameter_set(&"planet_sun_direction", -dir)
 	sun_direction = -dir
+
+
+## Adopt the scene's Environment so ambient fill can be driven from the sky.
+## The values it arrives with are the deep-space base the fill blends up from.
+func bind_environment(env: Environment) -> void:
+	_environment = env
+	if env != null:
+		_ambient_base_color = env.ambient_light_color
+		_ambient_base_energy = env.ambient_light_energy
+
+
+## Sky-derived ambient near an atmospheric body — the PR4 stretch that retires
+## the flat ambient constant. Physically the fill light near a planet is its
+## own sky and sunlit face; both terms come from the same BodyAtmosphere the
+## shell renders with, scaled by proximity and by how much of the lit face the
+## observer hangs over. In deep space this decays exactly to the old base
+## values, so nothing changes far from a body.
+func _update_ambient() -> void:
+	if _environment == null:
+		return
+	var best: CelestialBody = null
+	var best_f: float = 0.0
+	for body in bodies:
+		if body.def.atmosphere == null:
+			continue
+		# Fades in from 7 radii out; full strength at the surface.
+		var f: float = clampf(
+			1.0 - (body.true_distance - body.def.radius) / (body.def.radius * 6.0),
+			0.0, 1.0)
+		if f > best_f:
+			best_f = f
+			best = body
+	if best == null or best_f <= 0.0:
+		_environment.ambient_light_color = _ambient_base_color
+		_environment.ambient_light_energy = _ambient_base_energy
+		return
+	# The render origin rides the tracked ship, so the body's render-space
+	# position points from the observer to the body.
+	var up: Vector3 = -best.position.normalized()
+	var lit: float = clampf(sun_direction.dot(up) * 0.5 + 0.5, 0.0, 1.0)
+	var atmo: BodyAtmosphere = best.def.atmosphere
+	var strength: float = best_f * lit
+	_environment.ambient_light_color = _ambient_base_color.lerp(
+		atmo.ambient_sky_color.lerp(atmo.ground_albedo_tint, 0.35), strength)
+	_environment.ambient_light_energy = _ambient_base_energy * (1.0 - strength * 0.35) \
+		+ strength * 1.6
 
 
 ## --- Queries -----------------------------------------------------------------

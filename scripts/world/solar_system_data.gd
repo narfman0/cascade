@@ -56,6 +56,7 @@ static func build() -> Array[BodyDef]:
 		[0.7, Color(0.93, 0.87, 0.72)], [1.0, Color(0.80, 0.70, 0.52)]]))
 	venus.surface.band_frequency = 5.0
 	venus.surface.band_wobble = 1.4
+	venus.atmosphere = BodyAtmosphere.venus()
 	_spin(venus, 6000.0, 0.05)
 	bodies.append(venus)
 
@@ -74,6 +75,7 @@ static func build() -> Array[BodyDef]:
 	_authored(earth.surface, "earth")
 	earth.surface.night_emissive = _map("earth_night")
 	earth.surface.sites = [_nyc()]
+	earth.atmosphere = BodyAtmosphere.earth()
 	_spin(earth, 1800.0, 0.41)
 	bodies.append(earth)
 
@@ -94,6 +96,7 @@ static func build() -> Array[BodyDef]:
 		[0.0, Color(0.42, 0.22, 0.15)], [0.4, Color(0.72, 0.42, 0.30)],
 		[0.8, Color(0.85, 0.60, 0.45)], [1.0, Color(0.93, 0.84, 0.76)]]))
 	_authored(mars.surface, "mars")
+	mars.atmosphere = BodyAtmosphere.mars()
 	_spin(mars, 1900.0, 0.44)
 	bodies.append(mars)
 
@@ -105,6 +108,9 @@ static func build() -> Array[BodyDef]:
 		[0.0, Color(0.58, 0.44, 0.32)], [0.25, Color(0.82, 0.72, 0.58)],
 		[0.5, Color(0.93, 0.88, 0.78)], [0.7, Color(0.70, 0.53, 0.40)],
 		[1.0, Color(0.87, 0.79, 0.65)]]))
+	# Gas giants: no shell — the visible surface already is atmosphere. A
+	# limb-softening term only (docs/planet-renderer.md, per-body table).
+	jupiter.limb_darkening = 0.65
 	_spin(jupiter, 900.0, 0.05)
 	bodies.append(jupiter)
 
@@ -148,6 +154,7 @@ static func build() -> Array[BodyDef]:
 	saturn.surface = _banded(&"saturn", 10.0, 0.9, _grad([
 		[0.0, Color(0.74, 0.64, 0.46)], [0.4, Color(0.88, 0.80, 0.62)],
 		[0.7, Color(0.94, 0.89, 0.75)], [1.0, Color(0.80, 0.72, 0.55)]]))
+	saturn.limb_darkening = 0.6
 	_spin(saturn, 1000.0, 0.47)
 	bodies.append(saturn)
 
@@ -157,6 +164,7 @@ static func build() -> Array[BodyDef]:
 	titan.surface = _surf(&"titan", 1.2, 0.0, 0.008, -1.0, _grad([
 		[0.0, Color(0.55, 0.40, 0.22)], [0.5, Color(0.72, 0.58, 0.36)],
 		[1.0, Color(0.86, 0.73, 0.48)]]))
+	titan.atmosphere = BodyAtmosphere.titan()
 	_spin(titan, 3600.0, 0.02)
 	bodies.append(titan)
 
@@ -166,6 +174,7 @@ static func build() -> Array[BodyDef]:
 	uranus.surface = _banded(&"uranus", 4.0, 0.3, _grad([
 		[0.0, Color(0.48, 0.68, 0.72)], [0.5, Color(0.55, 0.75, 0.78)],
 		[1.0, Color(0.66, 0.84, 0.86)]]))
+	uranus.limb_darkening = 0.5
 	_spin(uranus, 1500.0, 1.71)   # rolls on its side, like the real thing
 	bodies.append(uranus)
 
@@ -175,6 +184,7 @@ static func build() -> Array[BodyDef]:
 	neptune.surface = _banded(&"neptune", 6.0, 1.0, _grad([
 		[0.0, Color(0.15, 0.26, 0.55)], [0.4, Color(0.28, 0.42, 0.75)],
 		[0.75, Color(0.42, 0.56, 0.86)], [1.0, Color(0.72, 0.80, 0.95)]]))
+	neptune.limb_darkening = 0.55
 	_spin(neptune, 1400.0, 0.49)
 	bodies.append(neptune)
 

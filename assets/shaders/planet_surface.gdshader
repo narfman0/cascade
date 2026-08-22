@@ -24,6 +24,17 @@ uniform float normal_strength = 1.0;
 uniform vec3 emissive_tint : source_color = vec3(1.0, 0.86, 0.58);
 uniform float emissive_energy = 2.5;
 
+// Night-lights gate thresholds on dot(normal, sun). Defaults keep the original
+// hardcoded band; a body with an atmosphere overrides them from
+// BodyAtmosphere.night_gate(), so the lights fade across the same twilight
+// band the sky does (PR4: twilight drives the city lights).
+uniform float night_gate_lo = -0.15;
+uniform float night_gate_hi = 0.05;
+
+// Linear limb-darkening for gas giants — their visible "surface" is already
+// atmosphere, so they get I(mu)/I(1) = 1 - u*(1 - mu) instead of a shell.
+uniform float limb_darkening = 0.0;
+
 // Sphere direction in surface-local (terrain) space: spin rotates the whole
 // PlanetSurface node, and patches sit under it by pure translation, so
 // VERTEX + patch_center normalized is exactly the direction the bake sampled.
@@ -69,15 +80,20 @@ void fragment() {
 			);
 		}
 
+		if (limb_darkening > 0.0) {
+			float ndv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
+			ALBEDO *= 1.0 - limb_darkening * (1.0 - ndv);
+		}
+
 		if (has_emissive) {
-			// Night lights fade in across dusk: full off at sun elevation
-			// dot 0.05, full on by -0.15 (the design doc's
-			// smoothstep(0.05, -0.15, d), written with ascending edges because
-			// GLSL leaves descending-edge smoothstep undefined).
+			// Night lights fade in across dusk, between the gate thresholds
+			// (ascending edges because GLSL leaves descending-edge smoothstep
+			// undefined). With an atmosphere the band is derived from its
+			// scale height, so lights and sky agree at the terminator.
 			vec3 sun_view = normalize(
 				(VIEW_MATRIX * vec4(planet_sun_direction, 0.0)).xyz
 			);
-			float night = 1.0 - smoothstep(-0.15, 0.05, dot(NORMAL, sun_view));
+			float night = 1.0 - smoothstep(night_gate_lo, night_gate_hi, dot(NORMAL, sun_view));
 			EMISSION = texture(emissive_tex, uv).rgb * emissive_tint
 				* night * emissive_energy;
 		}

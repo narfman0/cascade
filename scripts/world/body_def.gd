@@ -45,6 +45,16 @@ class_name BodyDef
 ## one (the Sun) keep the plain sphere. See docs/planet-renderer.md.
 @export var surface: BodySurface = null
 
+## Atmosphere and scattering parameters (docs/planet-renderer.md, PR4).
+## null means AIRLESS and must stay visibly airless — hard terminator, black
+## limb. Mercury, the Moon, Io, Europa, Ganymede and Callisto keep null on
+## purpose; the gate test asserts it.
+@export var atmosphere: BodyAtmosphere = null
+
+## Gas giants: limb-softening on the surface material instead of a shell —
+## their visible "surface" already is atmosphere. 0 disables.
+@export var limb_darkening: float = 0.0
+
 ## Simulation seconds per rotation, dramatized like orbital periods. 0 = none.
 @export var spin_period: float = 0.0
 

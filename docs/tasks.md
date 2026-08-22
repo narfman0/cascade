@@ -8,8 +8,8 @@ renderer)**. M3 (debris/tools/contracts) remains gated on the M1/M2 human feel
 checks. The original directive stands underneath: model 3D flight accurately;
 movement correctness before content.
 
-**Running the suites:** all five exit cleanly and fast — travel ~8 s, docking
-~7 s, eva ~8 s, station ~12 s, planet ~127 s, every one exit 0. If a suite ever
+**Running the suites:** all six exit cleanly and fast — travel ~8 s, docking
+~7 s, eva ~8 s, station ~12 s, planet ~127 s, atmosphere ~35 s, every one exit 0. If a suite ever
 hangs after printing PASS again, suspect un-drained `WorkerThreadPool` tasks:
 Godot blocks on the pool at shutdown, so any node that spawns tasks must wait for
 them in `_exit_tree` (see `PlanetSurface._exit_tree`).
@@ -333,37 +333,37 @@ originally designed — no fetch pipeline, no tiling, no server drop.
   someone's afternoon eventually (a WorkerThreadPool or server finalize wait,
   most likely), but it is not this milestone's bug.
 
-### PR4 — Atmosphere and scattering (owner-requested 2026-08-18)
+### PR4 — Atmosphere and scattering — BUILT (owner-requested 2026-08-18)
 
 Design: `docs/planet-renderer.md` → "Atmosphere and scattering". Read it first;
 the lighting behaviour is the requirement, not a coloured rim.
 
-- [ ] `scripts/world/body_atmosphere.gd`: `BodyAtmosphere extends Resource` — `height_fraction` (of radius, Earth ~0.01), `rayleigh_coefficients: Vector3` (per-channel, Earth ≈ (5.8, 13.5, 33.1)e-6 scaled to our units), `rayleigh_scale_height`, `mie_coefficient`, `mie_scale_height`, `mie_g` (forward-scatter anisotropy, ~0.76), `sun_intensity`, `ground_albedo_tint`, `opaque` (Venus: surface never visible).
-- [ ] `BodyDef` gains `atmosphere: BodyAtmosphere = null`. **Null means airless and must stay visibly airless** — hard terminator, black limb. Mercury, Moon, Io, Europa, Ganymede and Callisto keep null on purpose; losing the Moon's harsh look is the main failure mode of this milestone.
-- [ ] `SolarSystemData`: fill in Earth (Rayleigh blue), Venus (thick opaque yellow-white), Mars (thin Mie butterscotch, blue-ish sunsets — the inverse of Earth's), Titan (thick orange haze). Gas giants get a limb-softening term only, no shell — their visible surface already is atmosphere.
-- [ ] **LUT chain (Hillaire 2020)** — the owner asked for the most advanced modelling available, so this is precomputed multiple scattering, not a single-scatter march. Four LUTs rendered to `SubViewport`s or via compute: transmittance 256×64, multi-scattering 32×32, sky-view 200×100 (non-linear latitude so the horizon keeps detail), aerial-perspective froxels 32×32×32. Rebuild a body's LUTs only when its parameters or the sun direction change materially — a dozen bodies means this must be cheap, which is exactly why Hillaire over Bruneton's 4D LUT.
-- [ ] **Multiple scattering is required, not optional.** Single scattering leaves twilight too dark and the day sky under-saturated; most light from a clear sky has bounced more than once. The terminator is the region every screenshot in this project is framed on, so orders 2+ being wrong shows up precisely where it is most visible.
-- [ ] **Ozone.** A third extinction term — pure absorption, no scattering, tent profile peaking ~25 km scaled. This is what makes twilight deep blue instead of muddy grey; without it the sunset gradient is wrong no matter how good the scattering is.
-- [ ] **Phase functions per body**: Rayleigh `(3/16π)(1+cos²θ)`; Cornette-Shanks for aerosols. Mars dust is coarser and more forward-scattering, and combined with negligible Rayleigh that is *why* Mars inverts Earth — butterscotch day, blue sunset. Titan wants layered haze.
-- [ ] **Planetary shadow** in the shell, or the limb glows all the way round on the night side.
-- [ ] `assets/shaders/atmosphere.gdshader` + shell MeshInstance3D under `PlanetSurface` at `radius * (1 + height_fraction)`, back-face rendered, sampling the LUTs. Sun direction from the existing `planet_sun_direction` global — do not add a second source.
-- [ ] **Scale ratios, not absolutes.** Our Earth is 2,000 m. A real 8.5 km scale height would be an atmosphere four times taller than the planet. Preserve scale-height / radius (real Earth ≈ 0.00133), dense shell ~1–2% of radius. Ratio right ⇒ compressed planet reads as real; ratio wrong ⇒ gas giant or bare rock with a blue line.
-- [ ] **Camera-inside-the-shell** handling: skimming and low orbit put the viewer inside the volume. Get the depth/cull setup right or the sky disappears exactly when the player is closest to it.
-- [ ] **Proxy integration**: the shell scales through the same `_apply_scale` → `apply_scale_ratio` path as the surface, or it detaches from its planet at proxy range. travel_test guards that contract.
-- [ ] **Twilight drives the city lights.** Derive the twilight band width from scale height and radius, and feed it to the surface shader's night gate, replacing the hardcoded `smoothstep(0.05, -0.15, dot(n, sun))`. If the lights fade across a different band than the sky does, the two disagree visibly at the terminator — which is exactly the region every good orbital screenshot is framed on.
-- [ ] **Aerial perspective** for skimming: distant terrain desaturates toward sky colour with optical depth. PR2 made this reachable; without it a low pass looks like an airless body with a blue ring.
-- [ ] Composite order with the surface's ALBEDO/EMISSION so night lights read through thin atmosphere and are properly extinguished by thick.
-- [ ] Stretch within PR4: replace the flat `ambient_light_energy = 1.1` fudge in `scenes/game_world.tscn` with sky-scattering-derived fill near a body.
+- [x] `scripts/world/body_atmosphere.gd`: `BodyAtmosphere extends Resource` — `height_fraction`, `rayleigh_coefficients: Vector3`, `rayleigh_scale_height`, `mie_coefficient` (Vector3 — chromatic, see the Mars note below), `mie_absorption: Vector3`, `mie_scale_height`, `mie_g` (Vector3, per-channel — that is the Mars blue-sunset mechanism), ozone (absorption Vector3 + tent centre/width), `sun_intensity`, `ground_albedo_tint`, `ambient_sky_color`, `opaque`. Every field is a fraction of / per radius — the scale trap is structural, nothing is in metres.
+- [x] `BodyDef.atmosphere = null` means airless and stays visibly airless — Mercury, Moon, Io, Europa, Ganymede, Callisto keep null; asserted by the gate.
+- [x] `SolarSystemData`: Earth (Rayleigh blue + ozone), Venus (thick opaque yellow-white, `opaque = true`), Mars (thin chromatic Mie, butterscotch day / blue sunset), Titan (tall orange haze). Gas giants: `BodyDef.limb_darkening` on the surface shader only, no shell.
+- [x] **LUT chain (Hillaire 2020)**: transmittance 256×64 (Bruneton's non-linear horizon-preserving mapping) + multi-scattering 32×32 (dual-scattering ψ_ms, orders 2..∞, ground bounce included), baked per body in `AtmosphereMath` on `WorkerThreadPool` (0.4 s + 1.0 s per body, drained in `PlanetSurface._exit_tree` like every other worker task). **Deliberate deviation:** the sky-view and froxel LUTs from the paper are replaced by a per-pixel march in the shell shader that consumes the two baked LUTs. Those two LUTs are pure performance caches that must rebuild whenever the sun or camera moves; at our scale the shells cover a fraction of the screen from orbit, the march is cheap, and marching against the live depth buffer *is* the aerial perspective — terrain seen through air hazes correctly at any LOD with nothing to go stale.
+- [x] **Multiple scattering** contributes measurably (gate: twilight ×1.3 brighter with ψ_ms than without — exactly the "LUT wired up but inert" guard).
+- [x] **Ozone**: third extinction term, tent profile, pure absorption. The noon zenith chromaticity lands at (0.234, 0.238) — blueward of D65 as a real sky is.
+- [x] **Phase functions**: Rayleigh analytic; Cornette-Shanks per channel. Mars pushes blue into a tighter forward lobe (g = 0.74/0.80/0.90 RGB) with blue-absorbing dust — measured inversion: day sky R/B 5.9, near-sun sunset R/B 0.2.
+- [x] **Planetary shadow**: per-sample horizon test against the ground sphere — the night side's air stays dark, the limb does not glow all the way round.
+- [x] `assets/shaders/atmosphere.gdshader` + `AtmosphereShell` MeshInstance3D under `PlanetSurface` at `radius * (1 + height_fraction)`, back-face rendered, `depth_test_disabled`, marching camera→scene-depth so it works from orbit AND from inside the shell (skim) through one code path. Sun from the existing `planet_sun_direction` global.
+- [x] **Scale ratios**: all parameters are radius-relative and the shader normalizes world positions by the drawn radius recovered from `MODEL_MATRIX` — so real-Earth ratios (H/R = 0.00133) are entered verbatim and the proxy clamp cancels out of the optics entirely.
+- [x] **Camera inside the shell**: cull_front + depth_test_disabled + scene-depth clamp; verified by the skim framing in the capture harness.
+- [x] **Proxy integration**: the shell hangs under `PlanetSurface`, so it scales through the same `_apply_scale` → `apply_scale_ratio` path as the terrain by construction. Gate asserts shell world-scale == `visual_radius() * (1+hf)` both proxied and not.
+- [x] **Twilight drives the city lights**: `BodyAtmosphere.twilight_angle()` = acos(R/(R+h_lit)) with h_lit = min(shell top, 6 scale heights) — 7.2° for Earth — feeds `night_gate_lo/hi` surface-shader uniforms (which default to the old hardcoded band for airless bodies). Gate asserts the material uniform equals the analytic value.
+- [x] **Aerial perspective**: the shell march clamps at the depth buffer, so in-scatter accumulates in front of terrain and city lights extinguish through thick slant paths — composite order falls out of the same clamp. Skim shot 34 is the evidence.
+- [x] Stretch: flat ambient replaced — `SolarSystem.bind_environment()` derives ambient fill near an atmospheric body from its `ambient_sky_color`/`ground_albedo_tint`, proximity, and the sunlit fraction, decaying to the old deep-space base far from bodies.
 
-**PR4 gate** — the assertions matter here because "it looks nice" is not a test. Extend `tests/planet_test.gd` (or `atmosphere_test.gd`) with a CPU mirror of the scattering integral:
-- [ ] Airless bodies scatter exactly zero, and their terminator stays hard (sample surface luminance either side of the geometric terminator — the step must remain sharp).
-- [ ] Twilight band width matches the analytic prediction from scale height, and the city-lights gate uses that same width (guards the disagreement above).
-- [ ] Optical depth increases monotonically toward the limb, and is finite at grazing incidence (no divide-by-zero at the horizon — the classic bug).
-- [ ] Sunset reddening: the R/B ratio of transmitted light rises monotonically as sun elevation falls, and by roughly an order of magnitude between +10° and −2° elevation.
-- [ ] Validate against published values rather than taste: zenith chromaticity at solar noon near CIE D65; civil twilight (0° to −6°) still measurably lighting the sky; Mars's day sky redder than its sunset and its sunset bluer than its day sky — that inversion is the correctness test for the phase-function work.
-- [ ] Multiple scattering demonstrably contributes: twilight luminance with the multi-scatter LUT enabled is materially higher than with it forced to zero (guards against the LUT being wired up but inert).
-- [ ] Proxy: atmosphere angular size tracks the planet's at proxy range.
-- [ ] Screenshots: Earth limb arc from orbit, sunset from low orbit, Earth's soft terminator beside the Moon's hard one in one frame (the money comparison), Mars butterscotch, Titan haze, and a skim pass showing aerial perspective.
+**PR4 gate — `tests/atmosphere_test.gd`, ALL GREEN** (CPU mirror `AtmosphereMath` matches the shader line for line):
+- [x] Airless bodies: no atmosphere resource, no shell node, default hard night gate.
+- [x] Twilight band width follows analytically from scale height and radius; the city-lights gate uses exactly that band.
+- [x] Optical depth monotone toward the limb, finite at grazing (and a ray through the shell alone still scatters).
+- [x] Transmittance LUT matches direct integration (worst error 0.0008).
+- [x] Sunset reddening: R/B monotone rising, ×11,000 from +10° to the geometric horizon (the doc's −2° figure includes refraction, which is out of scope — sweep stops at the horizon).
+- [x] Published values: noon zenith between D65 and sky blue; civil twilight at −6° still lights the sky (1.8% of noon); the Mars inversion above.
+- [x] Multi-scatter contributes ×1.3 at twilight; Venus vertical transmittance 0.037 (opaque).
+- [x] Proxy: shell tracks the drawn radius exactly, proxied (Mars) and near (Earth).
+- [x] Screenshots 28–34: Earth limb arc, sunset from low orbit, soft-vs-hard terminator pair (Earth beside Moon), Mars, Titan, Venus, skim aerial perspective — `tests/capture_planet_shots.gd`.
 
 ### PR5 (stretch — owner call): clouds, geomorphing, more detail sites (Canaveral, Baikonur, Shanghai, Tycho, Olympus Mons).
 

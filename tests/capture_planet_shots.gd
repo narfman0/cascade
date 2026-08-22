@@ -87,8 +87,138 @@ func _ready() -> void:
 	await _frame_site(earth, &"nyc", 800.0, 0.55, 0.0, 26.0, 0.10)
 	await _shot("27_nyc_day")
 
+	# --- PR4: atmosphere and scattering ----------------------------------------
+
+	await _await_atmo(earth)
+
+	# 14. The limb arc: the iconic blue line against black, forward-lit.
+	await _frame_body(earth, 1.6, 1.35)
+	await _shot("28_earth_limb_arc")
+
+	# 15. Sunset from low orbit: grazing the terminator, sun on the horizon.
+	await _sunset_frame(earth)
+	await _shot("29_sunset_low_orbit")
+
+	# 16. THE COMPARISON: Earth's soft terminator beside the Moon's hard one —
+	#     one frame, same sun. The airless body staying airless is a PR4 gate.
+	await _terminator_pair(earth, _system.get_body(&"moon"))
+	await _shot("30_terminator_soft_vs_hard")
+
+	# 17-19. Per-body character: Mars butterscotch, Titan haze, Venus shroud.
+	var mars := _system.get_body(&"mars")
+	await _await_atmo(mars)
+	await _frame_body(mars, 2.3, 1.85)
+	await _shot("31_mars_terminator")
+	var titan := _system.get_body(&"titan")
+	await _await_atmo(titan)
+	await _frame_body(titan, 2.4, 1.5)
+	await _shot("32_titan_haze")
+	var venus := _system.get_body(&"venus")
+	await _await_atmo(venus)
+	await _frame_body(venus, 2.5, 1.3)
+	await _shot("33_venus_shroud")
+
+	# 20. Aerial perspective on a low pass: distant terrain hazing out is what
+	#     separates "has an atmosphere" from "has a blue ring".
+	await _skim_low(earth)
+	await _shot("34_skim_aerial")
+	_report(earth)
+
 	print("shots written to %s" % ProjectSettings.globalize_path(OUT_DIR))
 	get_tree().quit()
+
+
+## Atmosphere LUTs bake on the worker pool; hold the shot until the shell is
+## live, the same way the surface shots hold for textures_ready.
+func _await_atmo(body: CelestialBody) -> void:
+	var surface := body.planet_surface()
+	if surface == null or surface.atmosphere == null:
+		return
+	var deadline: int = Time.get_ticks_msec() + 60000
+	while not surface.atmosphere_ready and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+
+
+## Low above the terminator ring, looking toward the sun along the horizon —
+## the sunset framing.
+##
+## Every low-altitude framing here re-centres after the settle, same as
+## _frame_site and for the same reason: the body co-moves at ~131 m/s while
+## the frozen ship does not (standing trap #5), so even a two-second settle
+## leaves the camera hundreds of metres off a 70 m-altitude pose.
+func _sunset_frame(body: CelestialBody) -> void:
+	var resolve := func() -> Array:
+		var centre: Vector3 = OriginShift.to_render(body.true_pos)
+		var to_sun: Vector3 = (OriginShift.to_render(_system.get_body(&"sun").true_pos)
+			- centre).normalized()
+		var axis: Vector3 = to_sun.cross(Vector3.UP)
+		if axis.length() < 0.1:
+			axis = to_sun.cross(Vector3.RIGHT)
+		axis = axis.normalized()
+		# On the terminator ring, a touch into the day side, near the shell
+		# top (~50 m on Earth) — this framing is also the camera-inside-the-
+		# volume proof. The horizon dips ~15 deg at this altitude, so the aim
+		# drops about that much to hold it in frame.
+		var up_dir: Vector3 = to_sun.rotated(axis, 1.45)
+		var where: Vector3 = centre + up_dir * (body.def.radius + 70.0)
+		return [where, where + to_sun * 500.0 - up_dir * 126.0, up_dir]
+	await _hold_pose(resolve)
+	await _settle(body)
+	await _hold_pose(resolve)
+
+
+## Both discs in one frame, half-lit: Earth's twilight band against the Moon's
+## razor terminator. The camera sits perpendicular to the sun so both bodies
+## show the same phase.
+func _terminator_pair(earth: CelestialBody, moon: CelestialBody) -> void:
+	var resolve := func() -> Array:
+		var ec: Vector3 = OriginShift.to_render(earth.true_pos)
+		var mc: Vector3 = OriginShift.to_render(moon.true_pos)
+		var to_sun: Vector3 = (OriginShift.to_render(_system.get_body(&"sun").true_pos)
+			- ec).normalized()
+		var em: Vector3 = mc - ec
+		var em_dir: Vector3 = em.normalized()
+		var perp: Vector3 = em_dir.cross(to_sun)
+		if perp.length() < 0.1:
+			perp = em_dir.cross(Vector3.UP)
+		perp = perp.normalized()
+		# Behind and beside the Moon, offset toward the sun so both discs show
+		# their lit faces; the Moon's disc (~18 deg) rides beside Earth's
+		# (~13 deg), close enough in size that the terminators read as a pair.
+		var where: Vector3 = mc + em_dir * 2400.0 + perp * 1000.0 + to_sun * 1500.0
+		var dir_e: Vector3 = (ec - where).normalized()
+		var dir_m: Vector3 = (mc - where).normalized()
+		var up_v: Vector3 = dir_m.cross(dir_e)
+		if up_v.length() < 0.05:
+			up_v = Vector3.UP
+		return [where, where + (dir_e + dir_m).normalized() * 8000.0, up_v.normalized()]
+	await _hold_pose(resolve)
+	await _settle(earth)
+	await _hold_pose(resolve)
+
+
+## Lower than the skim framing and tilted further down: the haze gradient over
+## distant terrain is the aerial-perspective evidence.
+func _skim_low(body: CelestialBody) -> void:
+	var resolve := func() -> Array:
+		var centre: Vector3 = OriginShift.to_render(body.true_pos)
+		var to_sun: Vector3 = (OriginShift.to_render(_system.get_body(&"sun").true_pos)
+			- centre).normalized()
+		var axis: Vector3 = to_sun.cross(Vector3.UP)
+		if axis.length() < 0.1:
+			axis = to_sun.cross(Vector3.RIGHT)
+		var up: Vector3 = to_sun.rotated(axis.normalized(), 0.35)
+		var along: Vector3 = up.cross(Vector3.UP)
+		if along.length() < 0.1:
+			along = up.cross(Vector3.RIGHT)
+		along = along.normalized()
+		# 80 m up: the horizon dips ~16 deg, so the aim drops ~25 deg to put
+		# hazing terrain across the lower frame.
+		var where: Vector3 = centre + up * (body.def.radius + 80.0)
+		return [where, where + along * 400.0 - up * 190.0, up]
+	await _hold_pose(resolve)
+	await _settle(body)
+	await _hold_pose(resolve)
 
 
 ## Park the ship (which drives refinement) and the camera at `radii` times the

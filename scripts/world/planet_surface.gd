@@ -90,6 +90,13 @@ var radius: float = 1000.0
 var spin_period: float = 0.0
 var spin_axis_tilt: float = 0.0
 
+## Atmosphere parameters, or null for an airless body (which then keeps the
+## hard terminator and black limb — that look is load-bearing, see PR4).
+var atmosphere: BodyAtmosphere = null
+
+## True once both scattering LUTs are baked and the shell is live.
+var atmosphere_ready: bool = false
+
 ## Set by CelestialBody each frame. While proxied, only root patches stay
 ## resident and skim is impossible.
 var body_is_proxy: bool = false
@@ -111,6 +118,8 @@ var _ratio: float = 1.0
 var _skim_body: StaticBody3D = null
 var _skim_ship: RigidBody3D = null
 var _collider_nodes: Dictionary = {}
+var _atmo_shell: MeshInstance3D = null
+var _atmo_material: ShaderMaterial = null
 
 ## Per-site runtime state, keyed by DetailSite.id.
 var _sites: Dictionary = {}
@@ -151,12 +160,14 @@ class CacheEntry extends RefCounted:
 
 func setup(
 	p_surface: BodySurface, p_radius: float, p_spin_period: float,
-	p_spin_axis_tilt: float, p_base_color: Color, p_roughness: float
+	p_spin_axis_tilt: float, p_base_color: Color, p_roughness: float,
+	p_atmosphere: BodyAtmosphere = null, p_limb_darkening: float = 0.0
 ) -> void:
 	surface_res = p_surface
 	radius = p_radius
 	spin_period = p_spin_period
 	spin_axis_tilt = p_spin_axis_tilt
+	atmosphere = p_atmosphere
 	# Sites are metres on the sphere, so their angular extent needs the radius.
 	surface_res.prepare(radius)
 	_build_site_states()
@@ -165,6 +176,18 @@ func setup(
 	_material.shader = load("res://assets/shaders/planet_surface.gdshader")
 	_material.set_shader_parameter("base_color", p_base_color)
 	_material.set_shader_parameter("roughness_value", p_roughness)
+	if p_limb_darkening > 0.0:
+		_material.set_shader_parameter("limb_darkening", p_limb_darkening)
+	if atmosphere != null:
+		# The twilight band is derived from the atmosphere's scale height and
+		# drives the city-light gate, so lights and sky fade across the SAME
+		# band at the terminator (PR4 requirement). Airless bodies keep the
+		# shader's hard defaults.
+		var gate: Vector2 = atmosphere.night_gate()
+		_material.set_shader_parameter("night_gate_lo", gate.x)
+		_material.set_shader_parameter("night_gate_hi", gate.y)
+		_build_atmosphere_shell()
+		_start_atmo_bake()
 
 	# Root shell, synchronous: bodies build during bootstrap, and a body must
 	# never render as nothing while its first patches are in flight.
@@ -448,6 +471,87 @@ func _reap_tasks() -> void:
 			_task_ids.remove_at(i)
 		else:
 			i += 1
+
+
+## --- Atmosphere shell (PR4) ----------------------------------------------------
+
+## Back-face sphere at radius*(1+height_fraction), hanging under this node so
+## it inherits both the proxy scale and (harmlessly — spheres are symmetric)
+## the spin. Inheriting the scale IS the proxy contract: the shell can never
+## detach from its planet at range because they scale through the same path.
+func _build_atmosphere_shell() -> void:
+	var sphere := SphereMesh.new()
+	sphere.radius = 1.0
+	sphere.height = 2.0
+	sphere.radial_segments = 96
+	sphere.rings = 48
+
+	_atmo_material = ShaderMaterial.new()
+	_atmo_material.shader = load("res://assets/shaders/atmosphere.gdshader")
+	# Under any transparent local FX: the shell is the farthest haze there is.
+	_atmo_material.render_priority = -15
+	_atmo_material.set_shader_parameter("height_fraction", atmosphere.height_fraction)
+	_atmo_material.set_shader_parameter("rayleigh_scatter", atmosphere.rayleigh_coefficients)
+	_atmo_material.set_shader_parameter("rayleigh_h", atmosphere.rayleigh_scale_height)
+	_atmo_material.set_shader_parameter("mie_scatter", atmosphere.mie_coefficient)
+	_atmo_material.set_shader_parameter("mie_absorb", atmosphere.mie_absorption)
+	_atmo_material.set_shader_parameter("mie_h", atmosphere.mie_scale_height)
+	_atmo_material.set_shader_parameter("mie_g", atmosphere.mie_g)
+	_atmo_material.set_shader_parameter("ozone_absorb", atmosphere.ozone_absorption)
+	_atmo_material.set_shader_parameter("ozone_center", atmosphere.ozone_center)
+	_atmo_material.set_shader_parameter("ozone_width", atmosphere.ozone_width)
+	_atmo_material.set_shader_parameter("sun_intensity", atmosphere.sun_intensity)
+
+	_atmo_shell = MeshInstance3D.new()
+	_atmo_shell.name = "AtmosphereShell"
+	_atmo_shell.mesh = sphere
+	_atmo_shell.material_override = _atmo_material
+	_atmo_shell.scale = Vector3.ONE * (radius * (1.0 + atmosphere.height_fraction))
+	_atmo_shell.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# The camera sits inside this mesh while skimming; give the culler margin
+	# so grazing framings never drop the shell mid-flight.
+	_atmo_shell.extra_cull_margin = radius * 0.1
+	add_child(_atmo_shell)
+
+
+## LUT bake on the worker pool, exactly the texture-bake pattern below: arrays
+## on the worker, texture upload on the main thread, task id drained in
+## _exit_tree. Until the commit lands the shell renders as nothing (luts_ok
+## false), the same never-a-hole rule the surface bake follows.
+func _start_atmo_bake() -> void:
+	var atmo := atmosphere
+	var commit: Callable = _commit_atmo_luts
+	_task_ids.append(WorkerThreadPool.add_task(func() -> void:
+		var t_lut := AtmosphereMath.bake_transmittance(atmo)
+		var ms_lut := AtmosphereMath.bake_multi_scatter(atmo, t_lut)
+		commit.call_deferred(t_lut, ms_lut)
+	))
+
+
+func _commit_atmo_luts(t_lut: Dictionary, ms_lut: Dictionary) -> void:
+	if _atmo_material == null:
+		return
+	_atmo_material.set_shader_parameter("transmittance_lut", _lut_texture(t_lut))
+	_atmo_material.set_shader_parameter("ms_lut", _lut_texture(ms_lut))
+	_atmo_material.set_shader_parameter("luts_ok", true)
+	atmosphere_ready = true
+
+
+static func _lut_texture(lut: Dictionary) -> ImageTexture:
+	var img := Image.create_from_data(
+		lut["w"], lut["h"], false, Image.FORMAT_RGBF,
+		(lut["data"] as PackedFloat32Array).to_byte_array())
+	return ImageTexture.create_from_image(img)
+
+
+## The shell node, or null for an airless body. Tests assert both ways.
+func atmosphere_shell() -> MeshInstance3D:
+	return _atmo_shell
+
+
+## The shared surface material (tests inspect the night-gate uniforms).
+func material() -> ShaderMaterial:
+	return _material
 
 
 ## --- Texture bake -------------------------------------------------------------
