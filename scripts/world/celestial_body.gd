@@ -124,8 +124,8 @@ func _build_sphere_visual() -> void:
 		_glare.mesh = quad
 		_glare.material_override = glare_mat
 		_glare.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		_glare.scale = Vector3.ONE * (def.radius * 4.0)
-		_glare.extra_cull_margin = def.radius * 4.0
+		_glare.scale = Vector3.ONE * (def.radius * 12.0)
+		_glare.extra_cull_margin = def.radius * 12.0
 		add_child(_glare)
 	else:
 		var std := StandardMaterial3D.new()
@@ -219,10 +219,28 @@ func _apply_scale(ratio: float) -> void:
 	if _rings:
 		_rings.scale = Vector3(r, r * 0.02, r)
 	if _glare:
-		_glare.scale = Vector3.ONE * (r * 4.0)
+		_glare.scale = Vector3.ONE * (r * 12.0)
 	if _collision and not _collision.disabled:
 		# Collision only runs un-proxied, so the true radius is correct there.
 		(_collision.shape as SphereShape3D).radius = def.radius
+
+
+## Eclipse dimming for the glare billboard (Track SL1): the disc itself is
+## depth-occluded by the eclipsing body, but the additive halo has to be told.
+func set_glare_dim(factor: float) -> void:
+	if _glare:
+		(_glare.material_override as ShaderMaterial).set_shader_parameter(
+			"dim", factor)
+
+
+## Sun direction as seen from THIS body (Track SL5), not from the render
+## origin — the difference is what put Venus's crescent on the wrong side
+## when viewed across the system. Drives the surface shading, the night
+## gate, the cloud shadows and the atmosphere shell; the scene's
+## DirectionalLight keeps the origin-based aim, which is exact for the ship.
+func set_sun_direction(dir: Vector3) -> void:
+	if _surface:
+		_surface.set_sun_direction(dir)
 
 
 ## Radius as currently drawn — def.radius, shrunk by the proxy ratio when far.

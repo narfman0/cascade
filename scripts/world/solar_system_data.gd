@@ -25,7 +25,10 @@ class_name SolarSystemData
 ## requirement, and a missing map degrades to a plausible invented world rather
 ## than to a hole.
 
-const SUN_RADIUS: float = 20000.0
+## Sized for the REAL 0.53-degree disc from Earth orbit (Track SL2): the old
+## 20,000 m sun was 7.7 degrees across — fourteen times too wide. Angular
+## size at every other planet now falls out of the compressed distances.
+const SUN_RADIUS: float = 1390.0
 const EARTH_RADIUS: float = 2000.0
 
 ## Where the ship spawns: metres from Earth's centre, i.e. low orbit.
@@ -202,11 +205,13 @@ static func build() -> Array[BodyDef]:
 
 static func _sun() -> BodyDef:
 	# The Sun keeps its emissive sphere: no surface, no relief, no lights.
+	# Near-white: space sunlight is unfiltered 5772 K. Any warm cast now comes
+	# from real atmospheric transmittance (SL3/SL4), never from the source.
 	var sun := BodyDef.make(&"sun", "Sun", SUN_RADIUS, &"", 0.0, 1.0, 0.0, 0.0,
-		Color(1.0, 0.93, 0.75),
+		Color(1.0, 0.98, 0.95),
 		"Do not plot a course here.")
 	sun.emissive = true
-	sun.emission_energy = 12.0
+	sun.emission_energy = 30.0
 	sun.arrival_standoff_scale = 6.0
 	sun.is_destination = false
 	return sun

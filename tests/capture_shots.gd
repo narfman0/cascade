@@ -27,7 +27,13 @@ func _ready() -> void:
 	await _shot("02_earth_limb", ship, earth)
 
 	# Sunward: the star should read as a bright disc, not a white screen.
+	# At the spawn epoch MERCURY sits on the sun line and, now that the disc
+	# is true-scale (Track SL2), the transit occludes it entirely — a real
+	# planetary alignment photobombing the money shot. Step the clock so
+	# Mercury swings off the line (a quarter of its orbit) before framing.
 	var sun := system.get_body(&"sun")
+	SimClock.sim_time += 700.0
+	await _settle(10)
 	_aim_ship_at(ship, OriginShift.to_render(sun.true_pos))
 	await _settle(40)
 	await _shot("03_sunward", ship, sun)

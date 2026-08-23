@@ -136,8 +136,56 @@ func _ready() -> void:
 	await _shot("36_canaveral_dusk")
 	_report(earth)
 
+	# --- Track SL: sunlight ------------------------------------------------------
+
+	# 23. Deep in Earth's umbra (SL1): the hull goes dark, the glare dies,
+	#     and the world below is lit by nothing but its own cities.
+	await _umbra_frame(earth)
+	await _shot("37_umbra")
+
+	# 24. The sea glint (SL7): the sun's reflection on the water.
+	await _glint_frame(earth)
+	await _shot("38_sea_glint")
+
 	print("shots written to %s" % ProjectSettings.globalize_path(OUT_DIR))
 	get_tree().quit()
+
+
+## Anti-sun standoff inside the shadow cone, looking across the night side
+## toward the limb.
+func _umbra_frame(body: CelestialBody) -> void:
+	var resolve := func() -> Array:
+		var centre: Vector3 = OriginShift.to_render(body.true_pos)
+		var to_sun: Vector3 = (OriginShift.to_render(_system.get_body(&"sun").true_pos)
+			- centre).normalized()
+		var side: Vector3 = to_sun.cross(Vector3.UP)
+		if side.length() < 0.1:
+			side = to_sun.cross(Vector3.RIGHT)
+		side = side.normalized()
+		var where: Vector3 = centre - to_sun * (body.def.radius * 2.2)
+		return [where, centre + side * (body.def.radius * 0.4), side]
+	await _hold_pose(resolve)
+	await _settle(body)
+	await _hold_pose(resolve)
+
+
+## Mirror-angle framing: the camera and the sun sit symmetric about the
+## glint point's normal, which is where the specular disc lives.
+func _glint_frame(body: CelestialBody) -> void:
+	var resolve := func() -> Array:
+		var centre: Vector3 = OriginShift.to_render(body.true_pos)
+		var to_sun: Vector3 = (OriginShift.to_render(_system.get_body(&"sun").true_pos)
+			- centre).normalized()
+		var axis: Vector3 = to_sun.cross(Vector3.UP)
+		if axis.length() < 0.1:
+			axis = to_sun.cross(Vector3.RIGHT)
+		axis = axis.normalized()
+		var glint_dir: Vector3 = to_sun.rotated(axis, 0.35)
+		var where: Vector3 = centre + to_sun.rotated(axis, 0.66) * (body.def.radius * 1.7)
+		return [where, centre + glint_dir * body.def.radius, glint_dir]
+	await _hold_pose(resolve)
+	await _settle(body)
+	await _hold_pose(resolve)
 
 
 ## Atmosphere LUTs bake on the worker pool; hold the shot until the shell is

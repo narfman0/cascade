@@ -14,6 +14,15 @@ class_name SolarSystem
 ## assist holds station relative to that body instead of the system centre.
 const REFERENCE_INFLUENCE_SCALE: float = 30.0
 
+## Sunlight falls with the inverse square of distance (Track SL1), normalized
+## so Earth orbit keeps the tuned 1.5. The floor is a stated stylization —
+## Neptune at the real 1/54th of Earth's compressed-distance light would be
+## unreadable — and the cap keeps Mercury from clipping the tonemap.
+const EARTH_ORBIT: float = 300000.0
+const SUN_BASE_ENERGY: float = 1.5
+const SUN_ENERGY_FLOOR: float = 0.12
+const SUN_ENERGY_CAP: float = 2.5
+
 signal system_built
 
 ## Unit vector from the render origin toward the Sun, refreshed every frame
@@ -22,6 +31,14 @@ signal system_built
 ## RenderingServer.global_shader_parameter_get is editor-only — calling it in a
 ## running game logs an error per call.
 static var sun_direction: Vector3 = Vector3(0.0, 0.0, 1.0)
+
+## Fraction of the sun's disc visible from the render origin (Track SL1):
+## 1 in open space, 0 deep in a body's umbra, between in the penumbra.
+var sun_visibility: float = 1.0
+
+## Per-channel transmittance of direct sunlight at the origin (Track SL3):
+## white in vacuum, gold-to-red when the sun ray grazes an atmosphere.
+var sun_tint: Vector3 = Vector3.ONE
 
 var bodies: Array[CelestialBody] = []
 
@@ -96,6 +113,12 @@ func _update_bodies() -> void:
 	var t: float = SimClock.sim_time
 	for body in bodies:
 		body.update_render(t)
+		if _sun != null and body != _sun:
+			# Track SL5: each body is lit from where the sun is FOR IT.
+			body.set_sun_direction(Vector3(
+				float(_sun.true_pos[0] - body.true_pos[0]),
+				float(_sun.true_pos[1] - body.true_pos[1]),
+				float(_sun.true_pos[2] - body.true_pos[2])).normalized())
 	for station in stations:
 		station.update_render(t)
 	_aim_sun_light()
@@ -122,6 +145,19 @@ func _aim_sun_light() -> void:
 	# from: global parameter points from the render origin TOWARD the Sun.
 	RenderingServer.global_shader_parameter_set(&"planet_sun_direction", -dir)
 	sun_direction = -dir
+
+	# Track SL1 + SL3: sunlight is distance-true, eclipsed by bodies, and
+	# filtered by any atmosphere the sun ray grazes on its way here.
+	var origin: Array = [OriginShift.origin_x, OriginShift.origin_y, OriginShift.origin_z]
+	sun_visibility = sun_visibility_at(origin)
+	sun_tint = sun_filter_at(origin)
+	var energy: float = clampf(
+		SUN_BASE_ENERGY * pow(EARTH_ORBIT / len, 2.0),
+		SUN_ENERGY_FLOOR, SUN_ENERGY_CAP)
+	_sun_light.light_energy = energy * sun_visibility
+	_sun_light.light_color = Color(sun_tint.x, sun_tint.y, sun_tint.z)
+	if _sun:
+		_sun.set_glare_dim(sun_visibility)
 
 
 ## Adopt the scene's Environment so ambient fill can be driven from the sky.
@@ -168,6 +204,108 @@ func _update_ambient() -> void:
 		atmo.ambient_sky_color.lerp(atmo.ground_albedo_tint, 0.35), strength)
 	_environment.ambient_light_energy = _ambient_base_energy * (1.0 - strength * 0.35) \
 		+ strength * 1.6
+
+
+## --- Sunlight (Track SL) --------------------------------------------------------
+
+## Fraction of the sun's disc covered when two discs of angular radii
+## `ang_sun` and `ang_body` sit `sep` radians apart. Small-angle plane
+## geometry — exact enough at the sub-degree scales eclipses happen at, and
+## the smooth penumbra falls straight out of the lens-area formula.
+static func disc_occlusion(ang_sun: float, ang_body: float, sep: float) -> float:
+	if sep >= ang_sun + ang_body:
+		return 0.0
+	if sep <= ang_body - ang_sun:
+		return 1.0
+	if sep <= ang_sun - ang_body:
+		return (ang_body * ang_body) / maxf(ang_sun * ang_sun, 1e-12)
+	var r := ang_sun
+	var rb := ang_body
+	var d := maxf(sep, 1e-9)
+	var a1 := r * r * acos(clampf((d * d + r * r - rb * rb) / (2.0 * d * r), -1.0, 1.0))
+	var a2 := rb * rb * acos(clampf((d * d + rb * rb - r * r) / (2.0 * d * rb), -1.0, 1.0))
+	var k := (-d + r + rb) * (d + r - rb) * (d - r + rb) * (d + r + rb)
+	var lens := a1 + a2 - 0.5 * sqrt(maxf(k, 0.0))
+	return clampf(lens / (PI * r * r), 0.0, 1.0)
+
+
+## Visible fraction of the sun's disc from a true-space position: 1 in open
+## space, 0 in an umbra, in between across the penumbra. Every body between
+## here and the sun gets a say; the closest full occluder wins outright.
+func sun_visibility_at(true_pos: Array) -> float:
+	if _sun == null:
+		return 1.0
+	var sx: float = _sun.true_pos[0] - true_pos[0]
+	var sy: float = _sun.true_pos[1] - true_pos[1]
+	var sz: float = _sun.true_pos[2] - true_pos[2]
+	var ds: float = sqrt(sx * sx + sy * sy + sz * sz)
+	if ds < 1.0:
+		return 1.0
+	var sun_dir := Vector3(float(sx / ds), float(sy / ds), float(sz / ds))
+	var ang_sun: float = asin(clampf(_sun.def.radius / ds, 0.0, 1.0))
+	var vis: float = 1.0
+	for body in bodies:
+		if body == _sun:
+			continue
+		var bx: float = body.true_pos[0] - true_pos[0]
+		var by: float = body.true_pos[1] - true_pos[1]
+		var bz: float = body.true_pos[2] - true_pos[2]
+		var db: float = sqrt(bx * bx + by * by + bz * bz)
+		if db >= ds or db <= body.def.radius:
+			continue
+		var body_dir := Vector3(float(bx / db), float(by / db), float(bz / db))
+		var ang_body: float = asin(clampf(body.def.radius / db, 0.0, 1.0))
+		var sep: float = sun_dir.angle_to(body_dir)
+		vis *= 1.0 - disc_occlusion(ang_sun, ang_body, sep)
+		if vis <= 0.0:
+			return 0.0
+	return vis
+
+
+## Per-channel transmittance of the direct sun ray reaching a true-space
+## position (Track SL3). Vacuum is exactly white; a ray whose perigee grazes
+## an atmospheric shell is filtered through both half-paths of the tangent
+## chord, which is what turns the hull gold at an orbital sunrise. The solid
+## body itself is `sun_visibility_at`'s job, not this one's.
+func sun_filter_at(true_pos: Array) -> Vector3:
+	if _sun == null:
+		return Vector3.ONE
+	var sx: float = _sun.true_pos[0] - true_pos[0]
+	var sy: float = _sun.true_pos[1] - true_pos[1]
+	var sz: float = _sun.true_pos[2] - true_pos[2]
+	var ds: float = sqrt(sx * sx + sy * sy + sz * sz)
+	if ds < 1.0:
+		return Vector3.ONE
+	var sun_dir := Vector3(float(sx / ds), float(sy / ds), float(sz / ds))
+	var tint := Vector3.ONE
+	for body in bodies:
+		var atmo: BodyAtmosphere = body.def.atmosphere
+		if atmo == null:
+			continue
+		# Body centre relative to this position, in body radii.
+		var co := Vector3(
+			float(body.true_pos[0] - true_pos[0]),
+			float(body.true_pos[1] - true_pos[1]),
+			float(body.true_pos[2] - true_pos[2])) / body.def.radius
+		var top: float = 1.0 + atmo.height_fraction
+		var here_r: float = co.length()
+		if here_r < top:
+			# Inside the shell (skimming): one path out toward the sun.
+			var mu: float = (-co / here_r).dot(sun_dir)
+			tint *= AtmosphereMath.transmittance(atmo, maxf(here_r, 1.0), mu, 24)
+			continue
+		# Outside: does the ray to the sun graze the shell? Perigee of the
+		# line against the body, clamped to the segment toward the sun.
+		var t_perigee: float = co.dot(sun_dir)
+		if t_perigee <= 0.0 or t_perigee * body.def.radius >= ds:
+			continue
+		var perigee: float = (co - sun_dir * t_perigee).length()
+		if perigee >= top or perigee < 1.0:
+			# Clear miss, or blocked by the ground (the eclipse term's job).
+			continue
+		var half := AtmosphereMath.transmittance(atmo, maxf(perigee, 1.0), 0.0, 24)
+		tint *= half * half
+	return tint
 
 
 ## --- Queries -----------------------------------------------------------------

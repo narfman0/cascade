@@ -99,6 +99,7 @@ SOURCES = {
     "viking": "https://planetarymaps.usgs.gov/mosaic/Mars_Viking_ClrMosaic_global_925m.tif",
     "clouds": ("https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57747/"
                "cloud_combined_2048.jpg"),
+    "bsc5": "http://tdc-www.harvard.edu/catalogs/bsc5.dat.gz",
 }
 
 
@@ -181,10 +182,9 @@ def cook_earth():
 
     save_height(encode_height(small, 8500.0, 10500.0),
                 os.path.join(OUT, "earth_height.png"))
-    # 4096 since the fidelity tier (owner call 2026-08-23) — keep cook_earth
-    # and cook_earth_tiles writing the same albedo so reruns cannot regress it.
-    save_rgb(Image.open(fetch("bluemarble")),
-             os.path.join(OUT, "earth_albedo.png"), 4096, 2048)
+    # Same writer as cook_earth_tiles so reruns cannot regress the 4096 size
+    # or drop the sea-mask alpha (Track SL7).
+    save_earth_albedo(land_hi)
 
     # Night lights. The published Black Marble is a *composite*: warm yellow-white
     # lights painted over a blue-purple land base. Its luminance is therefore not
@@ -308,11 +308,137 @@ def cook_earth_tiles():
                     os.path.join(tdir, "earth_h_L%d_%d_%d.png" % (level, tx, ty)))
                 cooked += 1
     print("  %d tiles cooked, %d all-ocean L2 tiles skipped" % (cooked, skipped))
-    # The albedo ceiling moves with the terrain tier (owner call, 2026-08-23):
-    # 4096x2048 from the 5400-wide Blue Marble source — real detail, not
-    # upsampling, and no shader change since it stays one global texture.
-    save_rgb(Image.open(fetch("bluemarble")),
-             os.path.join(OUT, "earth_albedo.png"), 4096, 2048)
+    save_earth_albedo(land_hi)
+
+
+def save_earth_albedo(land_hi):
+    """Earth's albedo at 4096x2048 (owner call, 2026-08-23) with the SEA MASK
+    in the alpha channel (Track SL7): alpha 255 = land, 0 = sea, from the same
+    full-resolution ETOPO majority rule as every coastline in the project. The
+    surface shader turns sea texels glossy so the sun draws its glint disc."""
+    rgb = Image.open(fetch("bluemarble")).convert("RGB").resize(
+        (4096, 2048), Image.LANCZOS)
+    land = resize_f32(land_hi, 4096, 2048) >= 0.5
+    alpha = Image.fromarray(np.where(land, 255, 0).astype(np.uint8), mode="L")
+    rgba = rgb.convert("RGBA")
+    rgba.putalpha(alpha)
+    path = os.path.join(OUT, "earth_albedo.png")
+    rgba.save(path, optimize=True)
+    print("  wrote %s (%dx%d, RGBA8, alpha = land mask)" % (path, 4096, 2048))
+
+
+# --- The real sky (Track SL6) ---------------------------------------------------
+
+STARMAP_W, STARMAP_H = 4096, 2048
+EARTH_AXIAL_TILT = 0.41          # matches SolarSystemData._spin(earth, ..., 0.41)
+MAG_COMPRESSION = 0.6            # perceptual: linear magnitudes bury the faint sky
+
+
+def _bv_to_rgb(bv):
+    """B-V colour index -> linear-ish RGB, via the standard temperature
+    approximation and a compact blackbody fit. Good to the eye, which is the
+    bar a sky map has to clear."""
+    bv = max(-0.4, min(2.0, bv))
+    t = 4600.0 * (1.0 / (0.92 * bv + 1.7) + 1.0 / (0.92 * bv + 0.62))
+    t = max(2000.0, min(40000.0, t)) / 100.0
+    if t <= 66.0:
+        r = 1.0
+        g = min(1.0, max(0.0, (99.47 * math.log(t) - 161.12) / 255.0))
+    else:
+        r = min(1.0, max(0.0, 329.7 * ((t - 60.0) ** -0.1332) / 255.0))
+        g = min(1.0, max(0.0, 288.12 * ((t - 60.0) ** -0.0755) / 255.0))
+    if t >= 66.0:
+        b = 1.0
+    elif t <= 19.0:
+        b = 0.0
+    else:
+        b = min(1.0, max(0.0, (138.52 * math.log(t - 10.0) - 305.04) / 255.0))
+    return np.array([r, g, b], dtype=np.float32)
+
+
+def _equatorial_to_world(ra_rad, dec_rad):
+    """RA/Dec (J2000) -> game world direction: +Y is the celestial pole,
+    RA maps onto the game's lon = atan2(z, x) convention, then the whole
+    sphere leans by Earth's axial tilt about X — so the celestial pole sits
+    over Earth's spin axis and the ecliptic lies in the orbital plane."""
+    x = math.cos(dec_rad) * math.cos(ra_rad)
+    y = math.sin(dec_rad)
+    z = math.cos(dec_rad) * math.sin(ra_rad)
+    ct, st = math.cos(EARTH_AXIAL_TILT), math.sin(EARTH_AXIAL_TILT)
+    return x, y * ct - z * st, y * st + z * ct
+
+
+def cook_stars():
+    """The real night sky: the Yale Bright Star Catalog (~9,100 stars to
+    mag 6.5, public domain) splatted into an equirect panorama, coloured by
+    B-V temperature, magnitudes perceptually compressed so the faint sky
+    survives 8 bits; plus a Milky Way band as smoothed unresolved starlight
+    along the galactic plane. The real sky for the same reason as the real
+    coastline: Orion should be findable."""
+    import gzip
+
+    print("Star map")
+    img = np.zeros((STARMAP_H, STARMAP_W, 3), dtype=np.float32)
+    count = 0
+    with gzip.open(fetch("bsc5"), "rt", encoding="latin-1") as f:
+        for line in f:
+            try:
+                ra = (float(line[75:77]) + float(line[77:79]) / 60.0
+                      + float(line[79:83]) / 3600.0) * 15.0
+                dec = (float(line[84:86]) + float(line[86:88]) / 60.0
+                       + float(line[88:90]) / 3600.0)
+                if line[83] == "-":
+                    dec = -dec
+                vmag = float(line[102:107])
+                bv_txt = line[109:114].strip()
+                bv = float(bv_txt) if bv_txt else 0.5
+            except (ValueError, IndexError):
+                continue
+            x, y, z = _equatorial_to_world(math.radians(ra), math.radians(dec))
+            u = 0.5 + math.atan2(z, x) / (2.0 * math.pi)
+            v = 0.5 - math.asin(max(-1.0, min(1.0, y))) / math.pi
+            px, py = u * STARMAP_W, v * STARMAP_H
+            inten = 2.512 ** (-vmag * MAG_COMPRESSION) / 2.3
+            rgb = _bv_to_rgb(bv) * inten
+            sigma = 1.0 + 0.9 * min(inten, 1.2)
+            reach = int(3.0 * sigma) + 1
+            cy, cx = int(py), int(px)
+            for dy in range(-reach, reach + 1):
+                yy = cy + dy
+                if yy < 0 or yy >= STARMAP_H:
+                    continue
+                for dx in range(-reach, reach + 1):
+                    xx = (cx + dx) % STARMAP_W
+                    d2 = (cx + dx - px) ** 2 + (cy + dy - py) ** 2
+                    img[yy, xx] += rgb * math.exp(-d2 / (2.0 * sigma * sigma))
+            count += 1
+    print("  %d stars splatted" % count)
+
+    # Milky Way: unresolved starlight as a gaussian band about the galactic
+    # plane, patchy via smoothed noise. Galactic north pole (J2000):
+    # RA 192.859, Dec +27.128 — pushed through the same world transform.
+    pole = np.array(_equatorial_to_world(
+        math.radians(192.859), math.radians(27.128)), dtype=np.float32)
+    vv, uu = np.mgrid[0:STARMAP_H, 0:STARMAP_W].astype(np.float32)
+    lon = (uu + 0.5) / STARMAP_W * 2.0 * np.pi - np.pi
+    lat = np.pi / 2.0 - (vv + 0.5) / STARMAP_H * np.pi
+    dirs = np.stack([np.cos(lat) * np.cos(lon), np.sin(lat),
+                     np.cos(lat) * np.sin(lon)], axis=-1)
+    b = np.arcsin(np.clip(dirs @ pole, -1.0, 1.0))
+    rng = np.random.default_rng(5309)
+    patch = np.asarray(Image.fromarray(
+        rng.random((64, 128)).astype(np.float32), mode="F")
+        .resize((STARMAP_W, STARMAP_H), Image.BICUBIC), dtype=np.float32)
+    band = np.exp(-(b / math.radians(9.0)) ** 2) * (0.5 + 0.7 * patch)
+    img += band[..., None] * np.array([0.055, 0.052, 0.05], dtype=np.float32)
+
+    out = np.clip(img / max(img.max(), 1e-6), 0.0, 1.0)
+    out = np.round(np.power(out, 1.0 / 1.6) * 255.0).astype(np.uint8)
+    sky_dir = os.path.join(ROOT, "assets", "sky")
+    os.makedirs(sky_dir, exist_ok=True)
+    path = os.path.join(sky_dir, "starmap.png")
+    Image.fromarray(out, mode="RGB").save(path, optimize=True)
+    print("  wrote %s (%dx%d, RGB8)" % (path, STARMAP_W, STARMAP_H))
 
 
 # --- NYC detail site ----------------------------------------------------------
@@ -509,12 +635,13 @@ def cook_canaveral():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", choices=[
-        "earth", "moon", "mars", "nyc", "clouds", "tiles", "canaveral"])
+        "earth", "moon", "mars", "nyc", "clouds", "tiles", "canaveral", "stars"])
     args = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
     jobs = {"earth": cook_earth, "moon": cook_moon, "mars": cook_mars,
             "nyc": cook_nyc, "clouds": cook_earth_clouds,
-            "tiles": cook_earth_tiles, "canaveral": cook_canaveral}
+            "tiles": cook_earth_tiles, "canaveral": cook_canaveral,
+            "stars": cook_stars}
     for name, fn in jobs.items():
         if args.only in (None, name):
             fn()

@@ -31,6 +31,8 @@ func _ready() -> void:
 	_test_authored_maps()
 	_test_cloud_climatology()
 	_test_height_tiles()
+	_test_real_sky()
+	await _test_sea_mask()
 	_test_patch_determinism()
 	_test_seam_agreement()
 	_test_geomorph_targets()
@@ -446,6 +448,100 @@ func _test_tile_streaming() -> void:
 		await get_tree().process_frame
 	_check(not surface.is_tile_resident("2:5:1"),
 		"the tile streams back out on departure")
+
+
+## Track SL6: the sky is the real one. Polaris must sit over Earth's spin
+## axis and Sirius must be where the catalog puts it — a broken RA/Dec
+## transform or a flipped panorama fails here, not in a screenshot review.
+func _test_real_sky() -> void:
+	print("\n== the real sky ==")
+	var tex := load("res://assets/sky/starmap.png") as Texture2D
+	_check(tex != null, "the star map is cooked and imported")
+	if tex == null:
+		return
+	var img: Image = tex.get_image()
+	if img.is_compressed():
+		img.decompress()
+
+	var polaris := _sky_window_peak(img, 37.9546, 89.2641)
+	_check(polaris > 0.15, "Polaris shines over the spin axis", "(%.2f)" % polaris)
+	var sirius := _sky_window_peak(img, 101.287, -16.7161)
+	_check(sirius > 0.5, "Sirius is the beacon it should be", "(%.2f)" % sirius)
+	# And the anti-Polaris point is dark — a flipped map fails this.
+	var south := _sky_window_peak(img, 37.9546 + 180.0, -89.2641)
+	_check(south < polaris * 0.8, "the south celestial pole is dimmer than Polaris",
+		"(%.2f)" % south)
+
+	var mean := 0.0
+	for k in 4096:
+		var x := (k * 61) % img.get_width()
+		var y := (k * 37) % img.get_height()
+		mean += img.get_pixel(x, y).get_luminance()
+	mean /= 4096.0
+	_check(mean > 0.001 and mean < 0.06, "sky luminance stays in exposure range",
+		"(mean %.4f)" % mean)
+
+
+## Peak luminance in a ~1 degree window around an RA/Dec position, through the
+## SAME equatorial->world transform the cook uses (axial tilt 0.41 about X).
+func _sky_window_peak(img: Image, ra_deg: float, dec_deg: float) -> float:
+	var ra := deg_to_rad(ra_deg)
+	var dec := deg_to_rad(dec_deg)
+	var x := cos(dec) * cos(ra)
+	var y := sin(dec)
+	var z := cos(dec) * sin(ra)
+	var tilt := 0.41
+	var dir := Vector3(x, y * cos(tilt) - z * sin(tilt), y * sin(tilt) + z * cos(tilt))
+	var u := 0.5 + atan2(dir.z, dir.x) / TAU
+	var v := 0.5 - asin(clampf(dir.y, -1.0, 1.0)) / PI
+	var cx := int(u * img.get_width())
+	var cy := int(v * img.get_height())
+	var reach := int(img.get_width() / 360.0) + 2
+	var peak := 0.0
+	for dy in range(-reach, reach + 1):
+		for dx in range(-reach, reach + 1):
+			var px := posmod(cx + dx, img.get_width())
+			var py := clampi(cy + dy, 0, img.get_height() - 1)
+			peak = maxf(peak, img.get_pixel(px, py).get_luminance())
+	return peak
+
+
+## Track SL7: the albedo's alpha channel is the sea mask, cut by the same
+## coastline rule as the height map — the two must agree on how much of the
+## world is land.
+func _test_sea_mask() -> void:
+	print("\n== sea mask ==")
+	# has_sea_spec lands with the texture-bake commit on the main thread.
+	var earth_surface := _system.get_body(&"earth").planet_surface()
+	var deadline: int = Time.get_ticks_msec() + 60000
+	while not earth_surface.textures_ready and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	var tex := load("res://assets/planets/earth_albedo.png") as Texture2D
+	var img: Image = tex.get_image()
+	if img.is_compressed():
+		img.decompress()
+	_check(img.get_format() == Image.FORMAT_RGBA8 or img.detect_alpha() != Image.ALPHA_NONE,
+		"the cooked albedo carries an alpha channel")
+	var land := 0.0
+	var total := 0.0
+	for iy in 128:
+		var vv := (float(iy) + 0.5) / 128.0
+		var weight := cos((vv - 0.5) * PI)
+		for ix in 256:
+			var px := int((float(ix) + 0.5) / 256.0 * img.get_width())
+			var py := int(vv * img.get_height())
+			total += weight
+			if img.get_pixel(px, py).a > 0.5:
+				land += weight
+	var fraction := land / total
+	_check(absf(fraction - 0.292) < 0.02,
+		"the sea mask agrees with the real coastline", "(%.3f vs 0.292)" % fraction)
+	var mat: ShaderMaterial = _system.get_body(&"earth").planet_surface().material()
+	_check(mat.get_shader_parameter("has_sea_spec") == true,
+		"Earth's surface material knows its sea is glossy")
+	var moon_mat: ShaderMaterial = _system.get_body(&"moon").planet_surface().material()
+	_check(moon_mat.get_shader_parameter("has_sea_spec") == null,
+		"a sea-less body keeps flat roughness")
 
 
 ## Geomorph targets (PR5): CUSTOM0/1 must carry the parent-level surface —

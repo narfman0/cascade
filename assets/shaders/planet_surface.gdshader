@@ -5,9 +5,17 @@ shader_type spatial;
 // fragment stage rebuild the exact sphere direction — so texture sampling has
 // no per-vertex UV seam at the antimeridian and no smearing at the poles.
 
-// Direction from the render origin toward the Sun, set by SolarSystem each
-// frame (it already aims the system light from the same numbers).
-global uniform vec3 planet_sun_direction;
+// Sun direction as seen from THIS body (Track SL5), world space, set by
+// SolarSystem each frame. The old origin-based global put Venus's crescent
+// on the wrong side when viewed across the system; per-body it is exact
+// everywhere, and the scene DirectionalLight (still origin-aimed, exact at
+// the ship) only supplies colour, energy and near-field shadows.
+uniform vec3 body_sun_dir = vec3(0.0, 0.0, 1.0);
+
+// Ocean specular (Track SL7): Earth's cooked albedo carries the sea mask in
+// its alpha channel (1 = land, 0 = sea). Only set for bodies whose albedo
+// actually encodes it — a procedural bake's alpha means nothing.
+uniform bool has_sea_spec = false;
 
 // Patch-node local position under PlanetSurface — the patch center. Vertices
 // are stored relative to it (float32 discipline, docs/planet-renderer.md).
@@ -82,7 +90,13 @@ void fragment() {
 		float lon = atan(sdir.z, sdir.x);
 		float lat = asin(clamp(sdir.y, -1.0, 1.0));
 		vec2 uv = vec2(0.5 + lon / TAU, 0.5 - lat / PI);
-		ALBEDO = texture(albedo_tex, uv).rgb;
+		vec4 alb = texture(albedo_tex, uv);
+		ALBEDO = alb.rgb;
+		if (has_sea_spec) {
+			// Sea texels go glossy so the sun draws its glint disc on the
+			// water; land keeps the body's rough default.
+			ROUGHNESS = mix(roughness_value, 0.16, 1.0 - alb.a);
+		}
 
 		// Baked slopes live in an east/south/up frame; rebuild it per pixel and
 		// perturb the interpolated geometric normal in view space.
@@ -117,7 +131,7 @@ void fragment() {
 			// in). Uniform scale, so the transpose is a valid inverse
 			// rotation once normalized.
 			vec3 sun_l = normalize(
-				transpose(mat3(MODEL_MATRIX)) * planet_sun_direction);
+				transpose(mat3(MODEL_MATRIX)) * body_sun_dir);
 			float ndl = dot(sdir, sun_l);
 			if (ndl > 0.02) {
 				// Where this point's sun ray crosses the cloud shell.
@@ -140,11 +154,35 @@ void fragment() {
 			// undefined). With an atmosphere the band is derived from its
 			// scale height, so lights and sky agree at the terminator.
 			vec3 sun_view = normalize(
-				(VIEW_MATRIX * vec4(planet_sun_direction, 0.0)).xyz
+				(VIEW_MATRIX * vec4(body_sun_dir, 0.0)).xyz
 			);
 			float night = 1.0 - smoothstep(night_gate_lo, night_gate_hi, dot(NORMAL, sun_view));
 			EMISSION = texture(emissive_tex, uv).rgb * emissive_tint
 				* night * emissive_energy;
 		}
+	}
+}
+
+
+void light() {
+	if (LIGHT_IS_DIRECTIONAL) {
+		// Track SL5: shade from THIS body's sun, not the scene light's
+		// origin-based aim. The scene light still supplies colour, energy
+		// (eclipse + distance, SL1) and near-field shadows via ATTENUATION.
+		vec3 sun_v = normalize((VIEW_MATRIX * vec4(body_sun_dir, 0.0)).xyz);
+		float ndl = clamp(dot(NORMAL, sun_v), 0.0, 1.0);
+		DIFFUSE_LIGHT += ndl * ATTENUATION * LIGHT_COLOR / PI;
+		// Track SL7: roughness-driven Blinn-Phong. Land at roughness 0.9
+		// contributes nearly nothing; the sea's 0.16 draws the glint disc.
+		float gloss = pow(1.0 - ROUGHNESS, 3.0);
+		if (gloss > 0.001) {
+			vec3 h = normalize(sun_v + VIEW);
+			float spec = pow(clamp(dot(NORMAL, h), 0.0, 1.0), mix(8.0, 900.0, gloss));
+			SPECULAR_LIGHT += spec * gloss * 0.7 * ndl * ATTENUATION * LIGHT_COLOR;
+		}
+	} else {
+		// Any non-directional light (none today) keeps plain lambert.
+		float ndl_o = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
+		DIFFUSE_LIGHT += ndl_o * ATTENUATION * LIGHT_COLOR / PI;
 	}
 }

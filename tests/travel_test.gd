@@ -27,6 +27,7 @@ func _ready() -> void:
 
 	_report_spawn(system, ship)
 	_test_bodies(system)
+	_test_sunlight(system)
 	_test_transfers(system, ship, autopilot)
 
 	print("")
@@ -43,6 +44,68 @@ func _check(ok: bool, label: String, detail: String = "") -> void:
 	else:
 		_failures += 1
 		print("  FAIL  %s %s" % [label, detail])
+
+
+## --- Sunlight (Track SL1 + SL2) ------------------------------------------------
+
+func _test_sunlight(system: SolarSystem) -> void:
+	print("\n== sunlight ==")
+	var sun := system.get_body(&"sun")
+	var earth := system.get_body(&"earth")
+
+	# SL2: the disc is the real 0.53 degrees from Earth orbit.
+	var width_deg: float = rad_to_deg(
+		2.0 * atan(sun.def.radius / earth.def.orbit_radius))
+	_check(absf(width_deg - 0.53) < 0.06, "the sun is 0.53 degrees from Earth",
+		"(%.2f deg)" % width_deg)
+
+	# SL1 geometry: deep in Earth's shadow the sun is gone; on the sunny side
+	# it is whole; a point grazing the disc's edge sits in the penumbra.
+	var to_earth := Vector3(
+		earth.true_pos[0] - sun.true_pos[0],
+		earth.true_pos[1] - sun.true_pos[1],
+		earth.true_pos[2] - sun.true_pos[2]).normalized()
+	var umbra: Array = [
+		earth.true_pos[0] + to_earth.x * earth.def.radius * 3.0,
+		earth.true_pos[1] + to_earth.y * earth.def.radius * 3.0,
+		earth.true_pos[2] + to_earth.z * earth.def.radius * 3.0,
+	]
+	_check(system.sun_visibility_at(umbra) < 0.05,
+		"Earth's umbra swallows the sun",
+		"(%.3f)" % system.sun_visibility_at(umbra))
+	var sunny: Array = [
+		earth.true_pos[0] - to_earth.x * earth.def.radius * 3.0,
+		earth.true_pos[1] - to_earth.y * earth.def.radius * 3.0,
+		earth.true_pos[2] - to_earth.z * earth.def.radius * 3.0,
+	]
+	_check(system.sun_visibility_at(sunny) > 0.999, "the sunny side sees it whole")
+	# Slide sideways off the shadow axis until the disc is half uncovered.
+	var side := to_earth.cross(Vector3.UP).normalized()
+	var pen_vis: float = 0.0
+	var found_partial := false
+	for k in 40:
+		var off: float = earth.def.radius * (0.9 + 0.01 * float(k))
+		var probe: Array = [
+			umbra[0] + side.x * off, umbra[1] + side.y * off, umbra[2] + side.z * off,
+		]
+		pen_vis = system.sun_visibility_at(probe)
+		if pen_vis > 0.05 and pen_vis < 0.95:
+			found_partial = true
+			break
+	_check(found_partial, "the penumbra is a gradient, not a switch",
+		"(%.2f)" % pen_vis)
+
+	# SL1 falloff: pure geometry, asserted through the pure formula.
+	_check(is_equal_approx(
+			SolarSystem.disc_occlusion(0.1, 0.2, 1.0), 0.0),
+		"clear separation occludes nothing")
+	_check(is_equal_approx(
+			SolarSystem.disc_occlusion(0.1, 0.2, 0.05), 1.0),
+		"full cover occludes everything")
+
+	# SL3 sanity here too: vacuum sunlight is exactly white.
+	_check(system.sun_filter_at(sunny).is_equal_approx(Vector3.ONE),
+		"vacuum sunlight is white")
 
 
 ## --- Spawn -------------------------------------------------------------------

@@ -22,6 +22,16 @@ uniform float star_intensity = 2.2;
 uniform float faint_scale = 430.0;
 uniform float faint_sparsity : hint_range(0.9, 0.999) = 0.988;
 
+// The REAL sky (Track SL6): the Yale Bright Star Catalog baked to an equirect
+// panorama by tools/cook_planet_maps.py --only stars, Milky Way included,
+// oriented so the celestial pole sits over Earth's spin axis — Orion, the
+// Dipper and the Southern Cross are findable. When present it replaces the
+// invented bright layer; the procedural faint layer stays as the sub-catalog
+// floor (the real sky continues below magnitude 6.5, it just has no names).
+uniform sampler2D star_map : source_color, filter_linear_mipmap, repeat_enable;
+uniform bool star_map_ok = false;
+uniform float star_map_gain = 2.4;
+
 float hash1(vec3 p) {
 	return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
 }
@@ -59,7 +69,14 @@ vec3 star_layer(vec3 dir, float scale, float sparsity, float intensity) {
 void sky() {
 	vec3 dir = normalize(EYEDIR);
 	vec3 col = space_color;
-	col += star_layer(dir, star_scale, star_sparsity, star_intensity);
+	if (star_map_ok) {
+		float lon = atan(dir.z, dir.x);
+		float lat = asin(clamp(dir.y, -1.0, 1.0));
+		vec2 uv = vec2(0.5 + lon / TAU, 0.5 - lat / PI);
+		col += texture(star_map, uv).rgb * star_map_gain;
+	} else {
+		col += star_layer(dir, star_scale, star_sparsity, star_intensity);
+	}
 	col += star_layer(dir, faint_scale, faint_sparsity, star_intensity * 0.45);
 	COLOR = col;
 }

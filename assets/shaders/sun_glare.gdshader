@@ -7,8 +7,12 @@ render_mode blend_add, unshaded, depth_draw_never, cull_disabled, fog_disabled;
 // the Sun's own sphere (which sits in front of the quad's plane) does not
 // occlude its own glare.
 
-uniform vec3 tint : source_color = vec3(1.0, 0.9, 0.72);
-uniform float intensity = 3.2;
+uniform vec3 tint : source_color = vec3(1.0, 0.96, 0.9);
+uniform float intensity = 5.5;
+
+// Eclipse factor (Track SL1): fraction of the sun's disc left visible from
+// the observer. The disc is depth-occluded for free; the halo is not.
+uniform float dim : hint_range(0.0, 1.0) = 1.0;
 
 varying vec2 v_uv;
 
@@ -36,9 +40,10 @@ void vertex() {
 
 void fragment() {
 	float r = length(v_uv);
-	float halo = exp(-r * 6.0);
-	float skirt = exp(-r * 2.1) * 0.2;
-	// Fade before the quad edge so the additive layer never shows a square.
-	float edge = smoothstep(1.0, 0.9, r);
-	ALBEDO = tint * (halo + skirt) * intensity * edge;
+	float halo = exp(-r * 14.0);
+	float skirt = exp(-r * 3.4) * 0.16;
+	// Fade before the quad edge so the additive layer never shows a square —
+	// starting well inside, or the skirt reads as a hard-edged ball.
+	float edge = smoothstep(0.85, 0.45, r);
+	ALBEDO = tint * (halo + skirt) * intensity * edge * dim;
 }

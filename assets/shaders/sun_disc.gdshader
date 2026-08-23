@@ -16,6 +16,8 @@ uniform float limb_power = 0.55;
 void fragment() {
 	float mu = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
 	float limb = pow(mu, limb_power);
-	ALBEDO = vec3(0.0);
-	EMISSION = tint * mix(edge_energy, core_energy, limb);
+	// Unshaded mode outputs ALBEDO as the final HDR colour and IGNORES
+	// EMISSION — writing the energy there rendered the disc black, which hid
+	// behind the glare until the disc shrank to true scale (Track SL2).
+	ALBEDO = tint * mix(edge_energy, core_energy, limb);
 }

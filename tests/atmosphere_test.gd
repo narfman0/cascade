@@ -42,6 +42,7 @@ func _ready() -> void:
 	_test_mars_inversion()
 	_test_venus_opaque()
 	_test_proxy_contract()
+	_test_sunlight_filter()
 	await _test_luts_reach_the_shell()
 
 	print("")
@@ -309,3 +310,64 @@ func _test_luts_reach_the_shell() -> void:
 			and mat.get_shader_parameter("transmittance_lut") != null
 			and mat.get_shader_parameter("ms_lut") != null,
 			"shell material carries both LUTs")
+		# Track SL4: two passes — extinction base, in-scatter next_pass, both
+		# fed the same LUTs so they march the same atmosphere.
+		var next := mat.next_pass as ShaderMaterial
+		_check(next != null
+			and next.get_shader_parameter("luts_ok") == true
+			and next.get_shader_parameter("transmittance_lut") != null,
+			"the in-scatter pass rides next_pass with the same LUTs")
+		# Track SL5: the shell is lit from THIS body's sun.
+		_check(mat.get_shader_parameter("body_sun_dir") != null,
+			"the shell carries a per-body sun direction")
+
+
+## Track SL3: direct sunlight filtered by the air it grazes. Constructed
+## geometry, asserted through SolarSystem.sun_filter_at.
+func _test_sunlight_filter() -> void:
+	print("\n== direct sunlight through the atmosphere ==")
+	var sun := _system.get_body(&"sun")
+	var earth := _system.get_body(&"earth")
+	var to_earth := Vector3(
+		earth.true_pos[0] - sun.true_pos[0],
+		earth.true_pos[1] - sun.true_pos[1],
+		earth.true_pos[2] - sun.true_pos[2]).normalized()
+	var side := to_earth.cross(Vector3.UP).normalized()
+
+	# Behind Earth, offset so the sun ray's perigee grazes the shell low, at
+	# ~1.0025 radii: an orbital sunrise through the dense air. The compressed
+	# sun is close enough that rays CONVERGE, pulling the perigee inward by
+	# the factor (1 - standoff/d_sun) — computed exactly so the probe rides
+	# just above the ground instead of guessing at it.
+	var standoff: float = earth.def.radius * 4.0
+	var parallax: float = 1.0 - standoff / (earth.def.orbit_radius + standoff)
+	var graze_off: float = earth.def.radius * 1.0025 / parallax
+	var graze: Array = [
+		earth.true_pos[0] + to_earth.x * earth.def.radius * 4.0 + side.x * graze_off,
+		earth.true_pos[1] + to_earth.y * earth.def.radius * 4.0 + side.y * graze_off,
+		earth.true_pos[2] + to_earth.z * earth.def.radius * 4.0 + side.z * graze_off,
+	]
+	var tint: Vector3 = _system.sun_filter_at(graze)
+	_check(tint.x / maxf(tint.z, 1e-9) > 3.0 and tint.x < 1.0,
+		"a grazing sun ray comes through gold-to-red",
+		"(R %.3f B %.4f)" % [tint.x, tint.z])
+
+	# Well clear of the shell: white, exactly.
+	var clear_off: float = earth.def.radius * 1.5
+	var clear_pos: Array = [
+		earth.true_pos[0] + to_earth.x * earth.def.radius * 4.0 + side.x * clear_off,
+		earth.true_pos[1] + to_earth.y * earth.def.radius * 4.0 + side.y * clear_off,
+		earth.true_pos[2] + to_earth.z * earth.def.radius * 4.0 + side.z * clear_off,
+	]
+	_check(_system.sun_filter_at(clear_pos).is_equal_approx(Vector3.ONE),
+		"clear of the shell the light is white")
+
+	# The Moon has no atmosphere to filter with — behind it, still white
+	# (its umbra is the eclipse term's business, not the filter's).
+	var moon := _system.get_body(&"moon")
+	var near_moon: Array = [
+		moon.true_pos[0] + moon.def.radius * 1.6,
+		moon.true_pos[1], moon.true_pos[2],
+	]
+	_check(_system.sun_filter_at(near_moon).is_equal_approx(Vector3.ONE),
+		"airless bodies never tint the light")

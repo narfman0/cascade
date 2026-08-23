@@ -115,3 +115,11 @@ func _wire_systems() -> void:
 	var world_env := get_node_or_null("Environment/WorldEnvironment") as WorldEnvironment
 	if world_env:
 		_system.bind_environment(world_env.environment)
+		# The real sky (Track SL6): hand the cooked star panorama to the sky
+		# shader. Missing file degrades to the procedural field, same rule as
+		# every other cooked asset.
+		var sky_mat := world_env.environment.sky.sky_material as ShaderMaterial
+		if sky_mat != null and ResourceLoader.exists("res://assets/sky/starmap.png"):
+			sky_mat.set_shader_parameter(
+				"star_map", load("res://assets/sky/starmap.png"))
+			sky_mat.set_shader_parameter("star_map_ok", true)

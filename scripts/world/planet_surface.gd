@@ -527,21 +527,29 @@ func _build_atmosphere_shell() -> void:
 	sphere.radial_segments = 96
 	sphere.rings = 48
 
+	# Two passes on one mesh (Track SL4): extinction multiplies the scene by
+	# per-channel transmittance, then its next_pass adds the in-scatter — the
+	# composite is exact per channel, no scalar-alpha compromise. Both march
+	# the same ray (atmosphere_common.gdshaderinc) with the same parameters.
 	_atmo_material = ShaderMaterial.new()
-	_atmo_material.shader = load("res://assets/shaders/atmosphere.gdshader")
+	_atmo_material.shader = load("res://assets/shaders/atmosphere_extinction.gdshader")
 	# Under any transparent local FX: the shell is the farthest haze there is.
 	_atmo_material.render_priority = -15
-	_atmo_material.set_shader_parameter("height_fraction", atmosphere.height_fraction)
-	_atmo_material.set_shader_parameter("rayleigh_scatter", atmosphere.rayleigh_coefficients)
-	_atmo_material.set_shader_parameter("rayleigh_h", atmosphere.rayleigh_scale_height)
-	_atmo_material.set_shader_parameter("mie_scatter", atmosphere.mie_coefficient)
-	_atmo_material.set_shader_parameter("mie_absorb", atmosphere.mie_absorption)
-	_atmo_material.set_shader_parameter("mie_h", atmosphere.mie_scale_height)
-	_atmo_material.set_shader_parameter("mie_g", atmosphere.mie_g)
-	_atmo_material.set_shader_parameter("ozone_absorb", atmosphere.ozone_absorption)
-	_atmo_material.set_shader_parameter("ozone_center", atmosphere.ozone_center)
-	_atmo_material.set_shader_parameter("ozone_width", atmosphere.ozone_width)
-	_atmo_material.set_shader_parameter("sun_intensity", atmosphere.sun_intensity)
+	var inscatter := ShaderMaterial.new()
+	inscatter.shader = load("res://assets/shaders/atmosphere.gdshader")
+	_atmo_material.next_pass = inscatter
+	for mat in [_atmo_material, inscatter]:
+		mat.set_shader_parameter("height_fraction", atmosphere.height_fraction)
+		mat.set_shader_parameter("rayleigh_scatter", atmosphere.rayleigh_coefficients)
+		mat.set_shader_parameter("rayleigh_h", atmosphere.rayleigh_scale_height)
+		mat.set_shader_parameter("mie_scatter", atmosphere.mie_coefficient)
+		mat.set_shader_parameter("mie_absorb", atmosphere.mie_absorption)
+		mat.set_shader_parameter("mie_h", atmosphere.mie_scale_height)
+		mat.set_shader_parameter("mie_g", atmosphere.mie_g)
+		mat.set_shader_parameter("ozone_absorb", atmosphere.ozone_absorption)
+		mat.set_shader_parameter("ozone_center", atmosphere.ozone_center)
+		mat.set_shader_parameter("ozone_width", atmosphere.ozone_width)
+		mat.set_shader_parameter("sun_intensity", atmosphere.sun_intensity)
 
 	_atmo_shell = MeshInstance3D.new()
 	_atmo_shell.name = "AtmosphereShell"
@@ -572,9 +580,12 @@ func _start_atmo_bake() -> void:
 func _commit_atmo_luts(t_lut: Dictionary, ms_lut: Dictionary) -> void:
 	if _atmo_material == null:
 		return
-	_atmo_material.set_shader_parameter("transmittance_lut", _lut_texture(t_lut))
-	_atmo_material.set_shader_parameter("ms_lut", _lut_texture(ms_lut))
-	_atmo_material.set_shader_parameter("luts_ok", true)
+	var t_tex := _lut_texture(t_lut)
+	var ms_tex := _lut_texture(ms_lut)
+	for mat in [_atmo_material, _atmo_material.next_pass as ShaderMaterial]:
+		mat.set_shader_parameter("transmittance_lut", t_tex)
+		mat.set_shader_parameter("ms_lut", ms_tex)
+		mat.set_shader_parameter("luts_ok", true)
 	atmosphere_ready = true
 
 
@@ -639,6 +650,18 @@ func material() -> ShaderMaterial:
 	return _material
 
 
+## Per-body sun direction (Track SL5), world space, driven by SolarSystem
+## every frame. One value feeds everything that shades this body: the surface
+## lighting and night gate, the cloud shadows, and the atmosphere shell.
+func set_sun_direction(dir: Vector3) -> void:
+	_material.set_shader_parameter("body_sun_dir", dir)
+	if _atmo_material != null:
+		_atmo_material.set_shader_parameter("body_sun_dir", dir)
+		var next: Material = _atmo_material.next_pass
+		if next is ShaderMaterial:
+			(next as ShaderMaterial).set_shader_parameter("body_sun_dir", dir)
+
+
 ## --- Texture bake -------------------------------------------------------------
 
 func _start_bake() -> void:
@@ -658,6 +681,10 @@ func _start_bake() -> void:
 func _commit_bake(images: Dictionary) -> void:
 	if surface_res.authored_albedo != null:
 		_material.set_shader_parameter("albedo_tex", surface_res.authored_albedo)
+		if surface_res.sea_level > -1.0:
+			# Track SL7: the cooked albedo's alpha is the sea mask; only an
+			# authored albedo on a body WITH a sea actually encodes it.
+			_material.set_shader_parameter("has_sea_spec", true)
 	else:
 		_material.set_shader_parameter(
 			"albedo_tex", ImageTexture.create_from_image(images["albedo"]))
