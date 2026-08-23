@@ -73,6 +73,19 @@ signal textures_baked
 @export var site_enter_distance: float = 3000.0
 @export var site_exit_distance: float = 4000.0
 
+## L2 height-tile streaming margins, degrees from the observer's sub-body
+## point to a tile's footprint. Enter is generous on purpose: a tile must be
+## resident BEFORE the error metric builds depth-3+ patches over it, so no
+## live deep patch is ever built against the wrong tile set. The enter/exit
+## gap is the usual anti-thrash hysteresis.
+@export var tile_enter_margin_deg: float = 14.0
+@export var tile_exit_margin_deg: float = 28.0
+
+## Cached patches at or above this depth are purged when their tile's
+## residency changes — shallower ones sample coarser than the L1/L2
+## difference can express and stay valid across the swap.
+@export var tile_purge_depth: int = 3
+
 ## Patches overlapping a resident site refine to at least this depth regardless
 ## of the error metric. At Earth's radius that is a 49 m patch — 1.5 m vertex
 ## spacing — which is what makes a 512² inset over a 400 m footprint mean
@@ -121,6 +134,7 @@ var _collider_nodes: Dictionary = {}
 var _atmo_shell: MeshInstance3D = null
 var _atmo_material: ShaderMaterial = null
 var _cloud_layer: MeshInstance3D = null
+var _tile_pending: Dictionary = {}
 
 ## Per-site runtime state, keyed by DetailSite.id.
 var _sites: Dictionary = {}
@@ -263,6 +277,7 @@ func _evaluate() -> void:
 		return
 	var cam_pos: Vector3 = eye
 	_update_sites(cam_pos)
+	_update_tile_streaming(cam_pos)
 	var amp_m: float = radius * surface_res.amplitude
 	for root in _roots:
 		_update_node(root, cam_pos, amp_m)
@@ -721,6 +736,11 @@ func _instance_site(state: SiteState) -> void:
 	# here) is pure waste.
 	if inst.has_method("setup_site"):
 		inst.call("setup_site", state.site, radius)
+	# The site's lights must fade across the SAME derived twilight band as the
+	# surface shader's night gate — one band for the sky, the map and the
+	# diorama (the pre-PR4 hardcoded band drifted from the derived one).
+	if atmosphere != null and inst.has_method("set_night_gate"):
+		inst.call("set_night_gate", atmosphere.night_gate())
 	anchor.add_child(inst)
 	_detach_site_physics(inst)
 
@@ -750,6 +770,85 @@ func _release_all_sites() -> void:
 	for state in _sites.values():
 		if state.resident:
 			_release_site(state)
+
+
+## --- L2 height-tile streaming ---------------------------------------------------
+
+## Stream the fine height tiles by observer proximity. Load I/O runs on the
+## worker pool; the pixel decode and the residency swap happen on the main
+## thread (Texture2D.get_image() is not thread-safe — same rule as prepare()).
+## Correctness rests on two facts: samplers snapshot the tile dictionary by
+## reference (a swap never changes a build in flight), and the enter margin is
+## wide enough that a tile is resident before any depth-3+ patch is built over
+## it — so a residency change only ever invalidates refs==0 CACHE entries,
+## which _purge_stale_patches drops for the refine loop to rebuild.
+func _update_tile_streaming(eye: Vector3) -> void:
+	if surface_res.l2_available_count() == 0:
+		return
+	var dir_local: Vector3 = (global_transform.affine_inverse() * eye).normalized()
+	for key in surface_res.wanted_l2_keys(dir_local, tile_enter_margin_deg):
+		if surface_res.is_tile_resident(key) or _tile_pending.has(key):
+			continue
+		_queue_tile_load(key)
+	var keep: Array = surface_res.wanted_l2_keys(dir_local, tile_exit_margin_deg)
+	for key in surface_res.resident_l2_keys():
+		if not keep.has(key):
+			surface_res.release_tile(key)
+			_purge_stale_patches(String(key))
+
+
+func _queue_tile_load(key: String) -> void:
+	_tile_pending[key] = true
+	var path: String = surface_res.l2_path(key)
+	var commit: Callable = _commit_tile_load
+	_task_ids.append(WorkerThreadPool.add_task(func() -> void:
+		# ResourceLoader.load is thread-safe; it carries the file I/O and the
+		# texture decompression, which is the part worth keeping off-frame.
+		var tex := load(path) as Texture2D
+		commit.call_deferred(key, tex)
+	))
+
+
+func _commit_tile_load(key: String, tex: Texture2D) -> void:
+	_tile_pending.erase(key)
+	if tex == null:
+		push_warning("PlanetSurface: height tile failed to load: %s" % key)
+		return
+	var img: Image = tex.get_image()
+	if img.is_compressed():
+		img.decompress()
+	if img.get_format() != Image.FORMAT_RGB8:
+		img.convert(Image.FORMAT_RGB8)
+	surface_res.commit_tile(key, {
+		"data": img.get_data(),
+		"w": img.get_width(),
+		"h": img.get_height(),
+	})
+	_purge_stale_patches(key)
+
+
+## Drop cached deep patches overlapping a tile whose residency changed: they
+## were built against the other tile set. Live leaves (refs > 0) are left
+## alone by design — the streaming margins exist so none are deep enough to
+## disagree visibly by the time residency changes under them.
+func _purge_stale_patches(key: String) -> void:
+	var rect: Array = BodySurface.tile_rect_deg(key)
+	var stale: Array = []
+	for cache_key in _cache:
+		var entry: CacheEntry = _cache[cache_key]
+		if entry.depth < tile_purge_depth or entry.refs > 0:
+			continue
+		var dir: Vector3 = (entry.arrays["center"] as Vector3).normalized()
+		var lon := rad_to_deg(atan2(dir.z, dir.x))
+		var lat := rad_to_deg(asin(clampf(dir.y, -1.0, 1.0)))
+		# Patch half-span as slack, so patches straddling the rect edge purge.
+		var slack := rad_to_deg(
+			PlanetPatchMesh.span_m(radius, entry.depth) * 0.75 / radius)
+		if lon >= rect[0] - slack and lon <= rect[1] + slack \
+				and lat >= rect[2] - slack and lat <= rect[3] + slack:
+			stale.append(cache_key)
+	for cache_key in stale:
+		_cache.erase(cache_key)
 
 
 ## --- Skim collision -----------------------------------------------------------

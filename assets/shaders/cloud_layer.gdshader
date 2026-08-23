@@ -1,5 +1,9 @@
 shader_type spatial;
-render_mode blend_mix, depth_draw_never, cull_back, diffuse_lambert_wrap, specular_disabled, fog_disabled;
+// diffuse_lambert, NOT lambert_wrap: wrap lights the deck ~30 deg past the
+// terminator, which swamps the 7.2-deg twilight band the atmosphere model
+// derives — clouds and sky must go dark across the SAME band (PR4's rule for
+// the city lights applies to the weather too).
+render_mode blend_mix, depth_draw_never, cull_back, diffuse_lambert, specular_disabled, fog_disabled;
 
 // Procedural cloud deck (PR5): one translucent sphere just above the terrain,
 // value-noise fbm over the sphere direction so there is no seam and no pole

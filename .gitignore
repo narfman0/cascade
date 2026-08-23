@@ -22,3 +22,4 @@ assets/meshes/
 *.log
 .idea/
 .vscode/
+__pycache__/

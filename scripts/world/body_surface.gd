@@ -71,15 +71,26 @@ class_name BodySurface extends Resource
 ## and reference elevations as the global map, so layers agree wherever both
 ## exist. Tiles are sparse — all-ocean L2 tiles are not cooked — and any lookup
 ## without a resident tile falls through to the global map. Empty = no tiles.
+##
+## Residency (streaming, owner-approved 2026-08-23): L1 is complete and small,
+## so it loads eagerly in prepare() and never leaves — the seamless floor. L2
+## tiles STREAM: PlanetSurface asks `wanted_l2_keys` for the observer's
+## sub-body direction each evaluate, loads on the worker pool, and commits or
+## releases through the replace-not-mutate swap below, which is what keeps
+## in-flight patch builds consistent — their samplers snapshot the dictionary
+## by reference and never see it change mid-build.
 @export var height_tile_prefix: String = ""
 
 const TILE_LEVELS: Array[int] = [2, 1]   # finest first — the sampler's order
+const L2_COLS: int = 8
+const L2_ROWS: int = 4
 
 var _height_data: PackedByteArray
 var _height_w: int = 0
 var _height_h: int = 0
 var _site_insets: Array = []
 var _tiles: Dictionary = {}
+var _l2_available: Dictionary = {}   # key -> res:// path, scanned once
 var _prepared: bool = false
 
 
@@ -139,36 +150,124 @@ func _cpu_image(tex: Texture2D) -> Image:
 	return img
 
 
-## Load whatever tiles the cook produced, synchronously, before any sampler
-## exists — one truth for every patch from frame zero, no cache-coherency
-## question. ~30 tiles cost well under a second at bootstrap and ~90 MB of
-## CPU-side pixels; distance-based streaming stays deferred and would slot in
-## here (replace `_tiles`, never mutate it — in-flight samplers hold snapshots).
+## Eager part of residency: all of L1 (the complete, seamless floor), plus a
+## one-time scan of which L2 tiles the cook produced. L2 pixels arrive later
+## through the streaming path below.
 func _load_height_tiles() -> void:
 	if height_tile_prefix == "":
 		return
 	var loaded := {}
-	for level in TILE_LEVELS:
-		var cols: int = 1 << (level + 1)
-		var rows: int = 1 << level
-		for ty in rows:
-			for tx in cols:
-				var path := "%s_L%d_%d_%d.png" % [height_tile_prefix, level, tx, ty]
-				if not ResourceLoader.exists(path):
-					continue
-				var timg := _cpu_image(load(path) as Texture2D)
-				if timg == null:
-					continue
-				loaded["%d:%d:%d" % [level, tx, ty]] = {
-					"data": timg.get_data(),
-					"w": timg.get_width(),
-					"h": timg.get_height(),
-				}
+	var cols: int = 1 << 2
+	var rows: int = 1 << 1
+	for ty in rows:
+		for tx in cols:
+			var path := "%s_L1_%d_%d.png" % [height_tile_prefix, tx, ty]
+			if not ResourceLoader.exists(path):
+				continue
+			var timg := _cpu_image(load(path) as Texture2D)
+			if timg == null:
+				continue
+			loaded["1:%d:%d" % [tx, ty]] = {
+				"data": timg.get_data(),
+				"w": timg.get_width(),
+				"h": timg.get_height(),
+			}
 	_tiles = loaded
+	for ty in L2_ROWS:
+		for tx in L2_COLS:
+			var path := "%s_L2_%d_%d.png" % [height_tile_prefix, tx, ty]
+			if ResourceLoader.exists(path):
+				_l2_available["2:%d:%d" % [tx, ty]] = path
 
 
 func tile_count() -> int:
 	return _tiles.size()
+
+
+func l2_available_count() -> int:
+	return _l2_available.size()
+
+
+## --- L2 streaming (driven by PlanetSurface) -----------------------------------
+
+## The available L2 keys whose footprint lies within `margin_deg` of the
+## observer's sub-body direction (surface-local, i.e. the map frame). Called
+## with a small margin to decide loads and a larger one to decide releases —
+## the gap is the hysteresis that stops a boundary hover from thrashing tiles.
+func wanted_l2_keys(dir_local: Vector3, margin_deg: float) -> Array:
+	var out: Array = []
+	if _l2_available.is_empty():
+		return out
+	var lon := rad_to_deg(atan2(dir_local.z, dir_local.x))
+	var lat := rad_to_deg(asin(clampf(dir_local.y, -1.0, 1.0)))
+	var span_lon := 360.0 / float(L2_COLS)
+	var span_lat := 180.0 / float(L2_ROWS)
+	for key in _l2_available:
+		var parts: PackedStringArray = String(key).split(":")
+		var tx := int(parts[1])
+		var ty := int(parts[2])
+		var lon0 := -180.0 + span_lon * float(tx)
+		var lat1 := 90.0 - span_lat * float(ty)
+		var dlon := _deg_outside(lon, lon0, lon0 + span_lon, true)
+		var dlat := _deg_outside(lat, lat1 - span_lat, lat1, false)
+		if maxf(dlon, dlat) <= margin_deg:
+			out.append(key)
+	return out
+
+
+static func _deg_outside(x: float, lo: float, hi: float, wrap: bool) -> float:
+	if x >= lo and x <= hi:
+		return 0.0
+	var d := minf(absf(x - lo), absf(x - hi))
+	if wrap:
+		d = minf(d, minf(absf(x - lo + 360.0), absf(x - hi - 360.0)))
+		d = minf(d, minf(absf(x - lo - 360.0), absf(x - hi + 360.0)))
+	return d
+
+
+func l2_path(key: String) -> String:
+	return _l2_available.get(key, "")
+
+
+func is_tile_resident(key: String) -> bool:
+	return _tiles.has(key)
+
+
+func resident_l2_keys() -> Array:
+	var out: Array = []
+	for key in _tiles:
+		if String(key).begins_with("2:"):
+			out.append(key)
+	return out
+
+
+## Replace-not-mutate: in-flight samplers hold the old dictionary.
+func commit_tile(key: String, tile: Dictionary) -> void:
+	var next := _tiles.duplicate()
+	next[key] = tile
+	_tiles = next
+
+
+func release_tile(key: String) -> void:
+	if not _tiles.has(key):
+		return
+	var next := _tiles.duplicate()
+	next.erase(key)
+	_tiles = next
+
+
+## Angular rect of a tile in the map frame, degrees: [lon0, lon1, lat0, lat1].
+static func tile_rect_deg(key: String) -> Array:
+	var parts: PackedStringArray = key.split(":")
+	var level := int(parts[0])
+	var cols: float = float(1 << (level + 1))
+	var rows: float = float(1 << level)
+	var tx := float(parts[1])
+	var ty := float(parts[2])
+	return [
+		-180.0 + 360.0 / cols * tx, -180.0 + 360.0 / cols * (tx + 1.0),
+		90.0 - 180.0 / rows * (ty + 1.0), 90.0 - 180.0 / rows * ty,
+	]
 
 
 func has_authored_height() -> bool:

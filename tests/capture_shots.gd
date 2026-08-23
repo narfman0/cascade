@@ -87,7 +87,9 @@ func _shot(label: String, ship: Node3D = null, subject: CelestialBody = null) ->
 		var cam: Camera3D = ship.get_node("CameraRig/Camera3D")
 		var to_subject: Vector3 = subject.position - cam.global_position
 		var forward: Vector3 = -cam.global_basis.z
-		var radius: float = (subject.get_node("Mesh") as MeshInstance3D).scale.x
+		# visual_radius, not the Mesh node's scale: surface bodies have no
+		# "Mesh" child (that lookup error-spammed every shot of a planet).
+		var radius: float = subject.visual_radius()
 		note = "  [%s: %.1f° wide, %.0f° off-axis]" % [
 			subject.nav_display_name(),
 			rad_to_deg(2.0 * atan(radius / maxf(to_subject.length(), 0.001))),

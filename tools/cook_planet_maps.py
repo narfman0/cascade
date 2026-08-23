@@ -331,19 +331,15 @@ def _tile_xy(lat, lon, z):
     return x, y
 
 
-def cook_nyc():
-    """Real terrain for the NYC diorama, from public-domain terrain tiles.
-
-    The window is ~29 km of real New York squeezed into the site's 400 m
-    footprint -- the diorama stylization from docs/planet-renderer.md. What
-    survives the squeeze is the shape that matters: Manhattan, the Hudson and
-    East rivers, the Upper Bay, Brooklyn and the Jersey shore.
-    """
-    print("NYC inset")
-    half_lat = NYC_SPAN_DEG * 0.5
-    half_lon = half_lat / math.cos(math.radians(NYC_LAT))
-    x0, y0 = _tile_xy(NYC_LAT + half_lat, NYC_LON - half_lon, TILE_Z)
-    x1, y1 = _tile_xy(NYC_LAT - half_lat, NYC_LON + half_lon, TILE_Z)
+def _terrarium_window(center_lat, center_lon, span_deg, n):
+    """Sample an n x n elevation window (metres) from the public-domain AWS
+    terrarium tiles, centred on (lat, lon), span_deg of latitude across. The
+    window is small enough that the Mercator/equirect difference inside it is
+    far below one texel."""
+    half_lat = span_deg * 0.5
+    half_lon = half_lat / math.cos(math.radians(center_lat))
+    x0, y0 = _tile_xy(center_lat + half_lat, center_lon - half_lon, TILE_Z)
+    x1, y1 = _tile_xy(center_lat - half_lat, center_lon + half_lon, TILE_Z)
     tx0, ty0, tx1, ty1 = int(x0), int(y0), int(x1), int(y1)
     print("  terrarium z%d tiles x %d..%d y %d..%d" % (TILE_Z, tx0, tx1, ty0, ty1))
 
@@ -361,11 +357,8 @@ def cook_nyc():
             # terrarium: elevation_m = R*256 + G + B/256 - 32768
             tiles[(tx, ty)] = a[:, :, 0] * 256.0 + a[:, :, 1] + a[:, :, 2] / 256.0 - 32768.0
 
-    # Sample the mosaic per output pixel. The window is small enough that the
-    # Mercator/equirect difference inside it is far below one texel.
-    n = NYC_INSET
-    lats = NYC_LAT + half_lat - (np.arange(n) + 0.5) / n * (2 * half_lat)
-    lons = NYC_LON - half_lon + (np.arange(n) + 0.5) / n * (2 * half_lon)
+    lats = center_lat + half_lat - (np.arange(n) + 0.5) / n * (2 * half_lat)
+    lons = center_lon - half_lon + (np.arange(n) + 0.5) / n * (2 * half_lon)
     out = np.zeros((n, n), dtype=np.float32)
     for j, la in enumerate(lats):
         fx, fy = _tile_xy(la, lons[0], TILE_Z)
@@ -379,17 +372,35 @@ def cook_nyc():
             if tile is None:
                 continue
             out[j, i] = tile[py, min(int((xv - tx) * 256), 255)]
+    return out
 
-    # Terrarium carries the tidal Hudson/East River at ~0 m, exactly the datum,
-    # so a strict e > 0 test leaves the rivers ragged. Call anything under a
-    # metre water, then run one 3x3 majority pass to knock out the single-pixel
-    # speckle that a 56 m/px DEM leaves along a marshy shoreline.
+
+def _tidal_water_mask(out):
+    """Anything under a metre is water, then one 3x3 majority pass to knock out
+    the single-pixel speckle a 56 m/px DEM leaves along a marshy shoreline —
+    the rule that made the Hudson read as a river, reused for every coastal
+    site window."""
     water = out < 1.0
     votes = np.zeros_like(water, dtype=np.int16)
     for dy in (-1, 0, 1):
         for dx in (-1, 0, 1):
             votes += np.roll(np.roll(water, dy, axis=0), dx, axis=1).astype(np.int16)
-    water = votes >= 5
+    return votes >= 5
+
+
+def cook_nyc():
+    """Real terrain for the NYC diorama, from public-domain terrain tiles.
+
+    The window is ~29 km of real New York squeezed into the site's 400 m
+    footprint -- the diorama stylization from docs/planet-renderer.md. What
+    survives the squeeze is the shape that matters: Manhattan, the Hudson and
+    East rivers, the Upper Bay, Brooklyn and the Jersey shore.
+    """
+    print("NYC inset")
+    n = NYC_INSET
+    out = _terrarium_window(NYC_LAT, NYC_LON, NYC_SPAN_DEG, n)
+    water = _tidal_water_mask(out)
+    half_lat = NYC_SPAN_DEG * 0.5
     print("  window %.0f m across, min %.0f m max %.0f m, %.1f%% land"
           % (2 * half_lat * 111320.0, out.min(), out.max(),
              100.0 * float((~water).mean())))
@@ -434,13 +445,76 @@ def cook_nyc():
     print("  wrote %s (%dx%d, L8, authored)" % (path, n, n))
 
 
+# --- Cape Canaveral detail site (PR5 site list, owner-picked 2026-08-23) -------
+
+CANAVERAL_LAT, CANAVERAL_LON = 28.55, -80.62
+CANAVERAL_SPAN_DEG = 0.26     # ~29 km: VAB and LC-39 north, CCSFS pads east,
+                              # Port Canaveral south, Banana/Indian rivers between
+
+## Real places inside the window, as (lat, lon, brightness) for the night
+## plate and as anchors the site scene reads to place its landmarks.
+CANAVERAL_LIGHTS = [
+    (28.608, -80.604, 0.55),   # LC-39A
+    (28.627, -80.621, 0.50),   # LC-39B
+    (28.586, -80.651, 0.85),   # VAB / industrial area
+    (28.615, -80.694, 0.35),   # Shuttle Landing Facility
+    (28.488, -80.577, 0.60),   # CCSFS pad row
+    (28.410, -80.605, 0.95),   # Port Canaveral / Cocoa Beach
+]
+
+
+def cook_canaveral():
+    """Real terrain for the Cape Canaveral diorama: the same 29-km-window
+    treatment as NYC. What survives the squeeze is exactly what identifies the
+    place from orbit -- the cape's hook, the barrier islands, and the Banana
+    and Indian rivers between them and the mainland."""
+    print("Canaveral inset")
+    n = NYC_INSET
+    out = _terrarium_window(CANAVERAL_LAT, CANAVERAL_LON, CANAVERAL_SPAN_DEG, n)
+    water = _tidal_water_mask(out)
+    print("  window min %.0f m max %.0f m, %.1f%% land"
+          % (out.min(), out.max(), 100.0 * float((~water).mean())))
+
+    # Florida is FLAT -- the whole window lives under ~20 m -- so the local
+    # positive reference is small or the cape reads as a water-level smear.
+    elev = np.where(water, np.minimum(out, -30.0), np.maximum(out, 1.0))
+    save_height(encode_height(elev, 60.0, 800.0),
+                os.path.join(OUT, "canaveral_height_inset.png"))
+
+    # Night plate: authored, like NYC's (no public raster resolves the window).
+    # Gaussian glows at the real installations plus a faint mottle over land --
+    # a launch coast at night, not a metropolis.
+    land = ~water
+    yy, xx = np.mgrid[0:n, 0:n].astype(np.float32)
+    half_lat = CANAVERAL_SPAN_DEG * 0.5
+    half_lon = half_lat / math.cos(math.radians(CANAVERAL_LAT))
+    glow = np.zeros((n, n), dtype=np.float32)
+    for la, lo, e in CANAVERAL_LIGHTS:
+        px = (lo - (CANAVERAL_LON - half_lon)) / (2 * half_lon) * n
+        py = ((CANAVERAL_LAT + half_lat) - la) / (2 * half_lat) * n
+        glow += e * np.exp(-((xx - px) ** 2 + (yy - py) ** 2) / (2 * 9.0 ** 2))
+    rng = np.random.default_rng(3928)
+    mottle = np.asarray(Image.fromarray(rng.random((16, 16)).astype(np.float32),
+                                        mode="F").resize((n, n), Image.BICUBIC),
+                        dtype=np.float32)
+    glow = np.clip(glow + 0.06 * mottle, 0.0, 1.0)
+    glow = np.where(land, glow, glow * 0.1)   # a little harbour light on water
+    edge = np.minimum(np.minimum(xx, n - 1 - xx), np.minimum(yy, n - 1 - yy))
+    glow *= np.clip(edge / (n * 0.12), 0.0, 1.0)
+    path = os.path.join(OUT, "canaveral_night.png")
+    Image.fromarray(np.round(glow * 255.0).astype(np.uint8), mode="L").save(path)
+    print("  wrote %s (%dx%d, L8, authored)" % (path, n, n))
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", choices=["earth", "moon", "mars", "nyc", "clouds", "tiles"])
+    ap.add_argument("--only", choices=[
+        "earth", "moon", "mars", "nyc", "clouds", "tiles", "canaveral"])
     args = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
     jobs = {"earth": cook_earth, "moon": cook_moon, "mars": cook_mars,
-            "nyc": cook_nyc, "clouds": cook_earth_clouds, "tiles": cook_earth_tiles}
+            "nyc": cook_nyc, "clouds": cook_earth_clouds,
+            "tiles": cook_earth_tiles, "canaveral": cook_canaveral}
     for name, fn in jobs.items():
         if args.only in (None, name):
             fn()

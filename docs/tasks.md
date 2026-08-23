@@ -378,7 +378,20 @@ the lighting behaviour is the requirement, not a coloured rim.
 - [x] **Earth height tile pyramid** — `cook_earth_tiles` cuts ETOPO 2022 at full source resolution into L1 (complete, effective 4096) + L2 (land-only, effective 8192) 1024² tiles, same encoding/references as the global map (36 tiles, ~54 MB, committed). `BodySurface` loads them eagerly in `prepare()`; the sampler prefers the finest resident tile per lookup and falls through to the global map, so sparse coverage is seamless by construction. Per-tile coastline majority rule matches the global cook.
 - [x] **Albedo ceiling raise** — `earth_albedo.png` recooked at 4096×2048 from the 5400-wide Blue Marble source (real detail, no shader change). Other bodies keep 2048 deliberately.
 - [x] Gate (`planet_test`, all green): cloud map present + shader anchored + Sahara clear + storm tracks cloudy; ≥30 tiles resident; the Himalaya resolves higher through tiles than the 2k global map; no step across a tile boundary; oceans stay oceans and the Sahara stays land through the tiled sampler.
-- [ ] Distance-based tile streaming — still deferred; the replace-not-mutate tile dictionary is the designed seam for it.
+- [x] **Distance-based tile streaming** (owner-requested 2026-08-23) — L1 stays eager (the complete, seamless floor); L2 tiles stream by the observer's sub-body point with 14°/28° enter/exit hysteresis. Loads run on the worker pool (the decode lands on the main thread — `Texture2D.get_image()` is not thread-safe), residency changes go through the replace-not-mutate dictionary swap so in-flight samplers stay consistent, and cached depth-3+ patches over a changed tile are purged for the refine loop to rebuild. The generous enter margin is the correctness argument: a tile is resident before any deep patch is built over it, so residency changes only ever touch refs==0 cache entries. Steady-state residency: ~1–4 L2 tiles (~12 MB) instead of all 28. Gate: `planet_test` "tile streaming" — the Himalaya's tile streams in on approach, sharpens the terrain, and streams back out on departure.
+
+### Lighting audit (owner-requested 2026-08-23) — findings and fixes
+
+Checked: sun energy/angular size (0.5° ≈ the real 0.53°), orthogonal directional shadows (4096 texels over the 500 m range ≈ 12 cm/texel, biases healthy), terrain/ship cast+receive in skim range, atmosphere composite order, ambient derivation, glare depth handling. Three defects found, all fixed:
+- [x] The cloud deck used `diffuse_lambert_wrap`, lighting clouds ~30° past the terminator — far outside the 7.2° derived twilight band. Now plain lambert: clouds, sky and city lights cross the terminator together.
+- [x] Detail-site lights still faded on the pre-PR4 hardcoded band (−0.15, 0.05) while the surface uses the derived (−0.126, 0.031). `PlanetSurface._instance_site` now hands the atmosphere's `night_gate()` to any site scene with `set_night_gate` — one band for everything.
+- [x] `capture_shots._shot` read a `Mesh` child that surface bodies do not have (error spam on every planet shot); now uses `visual_radius()`.
+
+### PR5 sites — Cape Canaveral (owner-picked 2026-08-23) — BUILT
+
+- [x] `cook_canaveral`: the NYC treatment on the launch coast — 29 km terrarium window at (28.55, −80.62) squeezed into a 400 m footprint. The cape's hook and the Banana/Indian rivers survive the squeeze (21.9% land); Florida-flat local references (60 m up) so the terrain reads instead of smearing. Night plate: authored gaussians at the real installations plus faint land mottle — a launch coast, not a metropolis.
+- [x] Site scripts refactored: shared `SiteBase` (tangent anchoring, curvature, inset lookups, lights plate, twilight fade) with `nyc_site` and `canaveral_site` as thin subclasses. Canaveral places LANDMARKS at real coordinates rather than a statistical lattice: the VAB block, LC-39A/B pads with towers, the SLF strip at its real ~330° bearing, the CCSFS pad row, Port Canaveral cluster — 15 props, deterministic seed.
+- [x] Gate: `planet_test` "canaveral site" — inset+scene+night plate present, streams in at 2.5 km and out past 4 km, landmarks placed, no physics bodies. Remaining site candidates: Baikonur, Shanghai, Tycho, Olympus Mons.
 
 ## Track SD — Stations and Docking (SD1 + SD2 COMPLETE — SD3 remains stretch)
 

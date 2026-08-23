@@ -124,6 +124,18 @@ func _ready() -> void:
 	await _shot("34_skim_aerial")
 	_report(earth)
 
+	# --- PR5 sites: Cape Canaveral ---------------------------------------------
+
+	# 21. The launch coast in daylight: the cape's hook, the rivers, the pads.
+	#     Yawed like the NYC shots — the rig centres the ship, so an un-yawed
+	#     aim hides the diorama exactly behind the hull.
+	await _frame_site(earth, &"canaveral", 600.0, 0.55, 0.0, 22.0, 0.06)
+	await _shot("35_canaveral_day")
+	# 22. And at dusk: pad and port lights against the dark coast.
+	await _frame_site(earth, &"canaveral", 900.0, -0.15, 0.0, 24.0, 0.16)
+	await _shot("36_canaveral_dusk")
+	_report(earth)
+
 	print("shots written to %s" % ProjectSettings.globalize_path(OUT_DIR))
 	get_tree().quit()
 
@@ -278,6 +290,20 @@ func _frame_site(
 	SimClock.sim_time = best_t
 	for _i in 4:
 		await get_tree().physics_frame
+
+	# The warp just moved the body along its orbit — up to hundreds of km —
+	# while the frozen ship stayed put. Past MAX_RENDER_DISTANCE the body goes
+	# PROXY, and the hold below would chase a proxy-scaled site transform:
+	# that was the nondeterministic orbit-framing bug in every site shot whose
+	# elevation search reached far. Jump the ship with the body first; the
+	# origin rebases, the body un-proxies, and the hold converges locally.
+	var jump_centre: Vector3 = OriginShift.to_render(body.true_pos)
+	var jump_dir: Vector3 = (surface.site_transform(id).origin - jump_centre)
+	if jump_dir.length() < 1.0:
+		jump_dir = Vector3.UP
+	_ship.global_position = jump_centre \
+		+ jump_dir.normalized() * (body.def.radius + distance)
+	await get_tree().physics_frame
 
 	var resolve := func() -> Array:
 		var centre: Vector3 = OriginShift.to_render(body.true_pos)

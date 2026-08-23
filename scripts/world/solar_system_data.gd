@@ -77,7 +77,7 @@ static func build() -> Array[BodyDef]:
 	# the sampler prefers the finest resident tile and falls back per lookup.
 	earth.surface.height_tile_prefix = "res://assets/planets/tiles/earth_h"
 	earth.surface.night_emissive = _map("earth_night")
-	earth.surface.sites = [_nyc()]
+	earth.surface.sites = [_nyc(), _canaveral()]
 	earth.atmosphere = BodyAtmosphere.earth()
 	earth.cloud_layer = true
 	earth.cloud_coverage = 0.48
@@ -268,6 +268,20 @@ static func _nyc() -> DetailSite:
 	site.night_emissive = _map("nyc_night")
 	if ResourceLoader.exists("res://scenes/sites/nyc.tscn"):
 		site.scene = load("res://scenes/sites/nyc.tscn") as PackedScene
+	return site
+
+
+## The launch coast (PR5 site list, owner-picked). Geography identifies it —
+## the cape's hook and the Banana/Indian rivers come from the real inset; the
+## scene adds the VAB, the LC-39 pads, the SLF strip and Port Canaveral.
+static func _canaveral() -> DetailSite:
+	var site := DetailSite.make(
+		&"canaveral", "Cape Canaveral", 28.55, -80.62, 400.0,
+		"Launch heritage coast. Half the catalogue you clean up left from here.")
+	site.height_inset = _map("canaveral_height_inset")
+	site.night_emissive = _map("canaveral_night")
+	if ResourceLoader.exists("res://scenes/sites/canaveral.tscn"):
+		site.scene = load("res://scenes/sites/canaveral.tscn") as PackedScene
 	return site
 
 

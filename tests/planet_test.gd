@@ -37,7 +37,9 @@ func _ready() -> void:
 	_test_spin_is_analytic()
 	_test_site_orientation()
 	await _test_site_streaming()
+	await _test_canaveral()
 	await _test_approach_refinement()
+	await _test_tile_streaming()
 	await _test_skim_collision()
 
 	print("")
@@ -335,38 +337,22 @@ func _region_mean(img: Image, lat_deg: float, lon_deg: float) -> float:
 	return sum / float(count)
 
 
-## Fidelity tier: the tile pyramid must actually be consulted, agree with the
-## global layer at the coastline, and resolve relief the 2k map cannot.
+## Fidelity tier: L1 eager, L2 streamed by proximity, and the pyramid must
+## actually be consulted, agree with the global layer at the coastline, and
+## resolve relief the 2k map cannot.
 func _test_height_tiles() -> void:
 	print("\n== height tiles ==")
-	var surface := _system.get_body(&"earth").planet_surface().surface_res
-	_check(surface.tile_count() >= 30, "Earth's tile pyramid is resident",
+	var earth := _system.get_body(&"earth")
+	var ps := earth.planet_surface()
+	var surface: BodySurface = ps.surface_res
+	_check(surface.tile_count() == 8, "L1 floor is resident at boot",
 		"(%d tiles)" % surface.tile_count())
-	var tiled := surface.make_sampler()
+	_check(surface.l2_available_count() >= 24, "L2 set is available to stream",
+		"(%d tiles)" % surface.l2_available_count())
 
-	# A global-map-only twin for comparison.
-	var solo := BodySurface.new()
-	solo.authored_height = load("res://assets/planets/earth_height.png")
-	solo.amplitude = surface.amplitude
-	solo.sea_level = surface.sea_level
-	solo.prepare(2000.0)
-	var global_only := solo.make_sampler()
-
-	# The Himalaya resolves sharper: the highest probe near Everest must rise
-	# above what the 2k global map can express (averaging planes the peaks).
-	var tiled_max := -2.0
-	var solo_max := -2.0
-	for dy in range(-6, 7):
-		for dx in range(-6, 7):
-			var dir := _dir(28.0 + float(dy) * 0.25, 87.0 + float(dx) * 0.25)
-			tiled_max = maxf(tiled_max, tiled.height_normalized(dir))
-			solo_max = maxf(solo_max, global_only.height_normalized(dir))
-	_check(tiled_max > solo_max,
-		"tiles resolve the Himalaya sharper than the global map",
-		"(tiled %.4f vs global %.4f)" % [tiled_max, solo_max])
-
-	# Continuity across a tile boundary (L2 tiles meet at lon 0): stepping an
+	# Continuity across a tile boundary (L1 tiles meet at lon 0): stepping an
 	# epsilon across it must not step the terrain.
+	var tiled := surface.make_sampler()
 	var west := tiled.height_normalized(_dir(46.0, -0.005))
 	var east := tiled.height_normalized(_dir(46.0, 0.005))
 	_check(absf(west - east) < 0.02, "no step across a tile boundary",
@@ -377,6 +363,76 @@ func _test_height_tiles() -> void:
 	_check(tiled.is_sea(_dir(0.0, -150.0)) and tiled.is_sea(_dir(30.0, -40.0)),
 		"oceans are still oceans through the tiles")
 	_check(not tiled.is_sea(_dir(23.0, 10.0)), "the Sahara is still land")
+
+
+## Fly to the Himalaya: the covering L2 tile must stream in, sharpen the
+## terrain beyond what the global map can express, and stream back out when
+## the ship leaves. Everest at 28N 87E sits in L2 tile 5,1.
+func _test_tile_streaming() -> void:
+	print("\n== tile streaming ==")
+	var earth := _system.get_body(&"earth")
+	var ps := earth.planet_surface()
+	var surface: BodySurface = ps.surface_res
+	var everest := _dir(28.0, 87.0)
+
+	# Park over the Himalaya (surface-local dir -> world via the spin).
+	_ship.freeze = true
+	var cam := get_viewport().get_camera_3d()
+	var deadline: int = Time.get_ticks_msec() + 15000
+	while Time.get_ticks_msec() < deadline:
+		var world_dir: Vector3 = (ps.global_transform.basis * everest).normalized()
+		var where: Vector3 = OriginShift.to_render(earth.true_pos) \
+			+ world_dir * (earth.def.radius + 2500.0)
+		_ship.global_position = where
+		await get_tree().physics_frame
+		if cam == null or cam.global_position.distance_to(where) < 20.0:
+			break
+
+	deadline = Time.get_ticks_msec() + 20000
+	while not surface.is_tile_resident("2:5:1") and Time.get_ticks_msec() < deadline:
+		ps.force_evaluate()
+		await get_tree().process_frame
+	_check(surface.is_tile_resident("2:5:1"),
+		"the Himalaya's L2 tile streams in on approach",
+		"(resident: %s)" % str(surface.resident_l2_keys()))
+
+	# Sharper than the global map while resident: the highest probe near
+	# Everest rises above what 2k averaging can keep.
+	var solo := BodySurface.new()
+	solo.authored_height = load("res://assets/planets/earth_height.png")
+	solo.amplitude = surface.amplitude
+	solo.sea_level = surface.sea_level
+	solo.prepare(2000.0)
+	var global_only := solo.make_sampler()
+	var tiled := surface.make_sampler()
+	var tiled_max := -2.0
+	var solo_max := -2.0
+	for dy in range(-6, 7):
+		for dx in range(-6, 7):
+			var dir := _dir(28.0 + float(dy) * 0.25, 87.0 + float(dx) * 0.25)
+			tiled_max = maxf(tiled_max, tiled.height_normalized(dir))
+			solo_max = maxf(solo_max, global_only.height_normalized(dir))
+	_check(tiled_max > solo_max,
+		"the streamed tile resolves the Himalaya sharper than the global map",
+		"(tiled %.4f vs global %.4f)" % [tiled_max, solo_max])
+
+	# Leave: fly to the antipode-ish far side; the tile must release.
+	deadline = Time.get_ticks_msec() + 15000
+	var away := _dir(-28.0, -93.0)
+	while Time.get_ticks_msec() < deadline:
+		var world_dir: Vector3 = (ps.global_transform.basis * away).normalized()
+		var where: Vector3 = OriginShift.to_render(earth.true_pos) \
+			+ world_dir * (earth.def.radius + 2500.0)
+		_ship.global_position = where
+		await get_tree().physics_frame
+		if cam == null or cam.global_position.distance_to(where) < 20.0:
+			break
+	deadline = Time.get_ticks_msec() + 20000
+	while surface.is_tile_resident("2:5:1") and Time.get_ticks_msec() < deadline:
+		ps.force_evaluate()
+		await get_tree().process_frame
+	_check(not surface.is_tile_resident("2:5:1"),
+		"the tile streams back out on departure")
 
 
 ## Geomorph targets (PR5): CUSTOM0/1 must carry the parent-level surface —
@@ -452,6 +508,40 @@ func _test_spin_is_analytic() -> void:
 
 
 ## --- PR2: refinement + budgets ----------------------------------------------
+
+## Cape Canaveral (PR5, owner-picked): the second site — real coastline inset,
+## landmark props at the real installations, streaming like NYC's.
+func _test_canaveral() -> void:
+	print("\n== canaveral site ==")
+	var earth := _system.get_body(&"earth")
+	var surface := earth.planet_surface()
+	var site: DetailSite = null
+	for s in earth.def.surface.sites:
+		if s.id == &"canaveral":
+			site = s
+	_check(site != null, "Earth carries the Cape Canaveral site")
+	if site == null:
+		return
+	_check(site.height_inset != null and site.scene != null
+			and site.night_emissive != null,
+		"the site has an inset, a scene and a night plate")
+
+	await _settle_over_site(earth, 2500.0, &"canaveral")
+	_check(surface.site_resident(&"canaveral"), "the site streams in inside 3 km")
+	var anchor := surface.get_node_or_null("Site_canaveral")
+	_check(anchor != null and anchor.get_child_count() > 0,
+		"the scene is instantiated under the anchor")
+	if anchor != null:
+		var cape := anchor.get_child(0)
+		var built: int = int(cape.call("building_count")) if cape.has_method(
+			"building_count") else 0
+		_check(built >= 6, "the landmarks are placed", "(%d props)" % built)
+		_check(cape.find_children("*", "PhysicsBody3D", true, false).is_empty(),
+			"the site scene carries no physics bodies")
+
+	await _settle_over_site(earth, 5000.0, &"canaveral")
+	_check(not surface.site_resident(&"canaveral"), "and streams back out")
+
 
 func _test_approach_refinement() -> void:
 	print("\n== approach refinement ==")
@@ -590,7 +680,7 @@ func _settle_at(body: CelestialBody, distance: float) -> Dictionary:
 ## let the surface settle. Distance is measured to the *site*, not to the body's
 ## centre, because that is what the streamer's thresholds are measured against.
 ## The site is re-read every hold frame: the planet is spinning underneath.
-func _settle_over_site(body: CelestialBody, distance: float) -> Dictionary:
+func _settle_over_site(body: CelestialBody, distance: float, site_id: StringName = &"nyc") -> Dictionary:
 	var surface := body.planet_surface()
 	_ship.freeze = true
 	# Wait for the *camera* to arrive, not just the ship. The rig follows on a
@@ -602,7 +692,7 @@ func _settle_over_site(body: CelestialBody, distance: float) -> Dictionary:
 	var cam := get_viewport().get_camera_3d()
 	var deadline: int = Time.get_ticks_msec() + 15000
 	while Time.get_ticks_msec() < deadline:
-		var xf: Transform3D = surface.site_transform(&"nyc")
+		var xf: Transform3D = surface.site_transform(site_id)
 		var out: Vector3 = (xf.origin - surface.global_position).normalized()
 		_ship.global_position = xf.origin + out * distance
 		# Up is the site's local north: `out` is the negative of the look

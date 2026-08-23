@@ -513,6 +513,8 @@ has to guess later which is which.
 | `nyc_night.png` | **Authored art.** A street grid on Manhattan's ~29° bearing, masked by the land/water mask of the inset above. No public night raster resolves a 29 km window | **synthetic** |
 | `earth_clouds.png` | NASA Visible Earth **Blue Marble Clouds** composite (id 57747), kept as an L8 cloud-fraction weight | real |
 | `tiles/earth_h_L{1,2}_x_y.png` | **ETOPO 2022** again, at full source resolution: the height tile pyramid (§7.3) | real |
+| `canaveral_height_inset.png` | AWS Open Data **Terrain Tiles**, 29 km window at 28.55 N 80.62 W — the cape, the barrier islands, the Banana/Indian rivers | real |
+| `canaveral_night.png` | **Authored art**: gaussian glows at the real installations (LC-39A/B, VAB, SLF, the CCSFS row, Port Canaveral) over faint land mottle | **synthetic** |
 
 Exact URLs are in the `SOURCES` table at the top of the cook script.
 
@@ -573,7 +575,12 @@ map already carries low-frequency bathymetry). Same split-16-bit encoding and
 the **same global reference elevations**, so a tile and the global map agree
 wherever both exist and `BodySurface.HeightSampler` can hard-switch layers
 per lookup (finest resident tile wins, global map is the floor) without a
-value step. Loaded synchronously and eagerly in `BodySurface.prepare()` —
-~36 tiles, well under a second, ~90 MB of CPU-side pixels. Distance-based
-streaming remains deferred; it would replace (never mutate) the tile
-dictionary, which in-flight worker samplers snapshot by reference.
+value step.
+
+Residency (2026-08-23): **L1 loads eagerly** in `prepare()` — the complete,
+seamless floor — and **L2 streams by observer proximity** (14°/28°
+enter/exit hysteresis, driven from `PlanetSurface._update_tile_streaming`).
+Residency changes go through a replace-not-mutate dictionary swap, which
+in-flight worker samplers snapshot by reference; cached deep patches over a
+changed tile are purged and rebuilt by the refine loop. Steady state holds
+~1–4 L2 tiles (~12 MB) instead of the whole set.
