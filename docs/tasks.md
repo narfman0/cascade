@@ -391,7 +391,18 @@ Checked: sun energy/angular size (0.5° ≈ the real 0.53°), orthogonal directi
 
 - [x] `cook_canaveral`: the NYC treatment on the launch coast — 29 km terrarium window at (28.55, −80.62) squeezed into a 400 m footprint. The cape's hook and the Banana/Indian rivers survive the squeeze (21.9% land); Florida-flat local references (60 m up) so the terrain reads instead of smearing. Night plate: authored gaussians at the real installations plus faint land mottle — a launch coast, not a metropolis.
 - [x] Site scripts refactored: shared `SiteBase` (tangent anchoring, curvature, inset lookups, lights plate, twilight fade) with `nyc_site` and `canaveral_site` as thin subclasses. Canaveral places LANDMARKS at real coordinates rather than a statistical lattice: the VAB block, LC-39A/B pads with towers, the SLF strip at its real ~330° bearing, the CCSFS pad row, Port Canaveral cluster — 15 props, deterministic seed.
-- [x] Gate: `planet_test` "canaveral site" — inset+scene+night plate present, streams in at 2.5 km and out past 4 km, landmarks placed, no physics bodies. Remaining site candidates: Baikonur, Shanghai, Tycho, Olympus Mons.
+- [x] Gate: `planet_test` "canaveral site" — inset+scene+night plate present, streams in at 2.5 km and out past 4 km, landmarks placed, no physics bodies.
+
+**OWNER DECISION (2026-08-23): no further detail sites.** Baikonur, Shanghai,
+Tycho and Olympus Mons are dropped from the plan permanently — do NOT propose
+or build them. The owner is evaluating NYC + Canaveral and will say so
+explicitly if the site system should ever roll out elsewhere.
+
+### Cloud shadows (owner-requested 2026-08-23) — BUILT
+
+- [x] The deck is transparent and cannot render into the shadow map, so the ground darkens itself: `planet_surface.gdshader` samples the cloud field at the point where each fragment's sun ray pierces the cloud shell — real offset shadows that stretch as the sun drops, fading out at the terminator where the twilight band owns the look.
+- [x] One field, one definition: the noise/threshold math moved into `assets/shaders/cloud_field.gdshaderinc`, included by BOTH the deck and the surface shader, and both materials are parameterized from `configure_clouds` alone — the shadow can never disagree with its cloud.
+- [x] Gate: surface material carries the shadow uniforms on Earth (matching the def), and `cloud_shadows` stays unset on airless bodies.
 
 ## Track SD — Stations and Docking (SD1 + SD2 COMPLETE — SD3 remains stretch)
 

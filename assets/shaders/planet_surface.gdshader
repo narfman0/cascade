@@ -41,6 +41,23 @@ uniform float night_gate_hi = 0.05;
 // atmosphere, so they get I(mu)/I(1) = 1 - u*(1 - mu) instead of a shell.
 uniform float limb_darkening = 0.0;
 
+// Cloud shadows: the deck is a transparent shell that cannot render into the
+// shadow map, so the ground darkens itself by sampling the SAME cloud field
+// (cloud_field.gdshaderinc) at the point where this fragment's sun ray
+// pierces the cloud shell — a real offset shadow that stretches as the sun
+// drops, in lockstep with the deck because both evaluate identical math on
+// the same TIME. Off (false) for every body without a deck.
+uniform bool cloud_shadows = false;
+uniform sampler2D cloud_map : filter_linear_mipmap, repeat_enable;
+uniform bool cloud_has_map = false;
+uniform float cloud_coverage = 0.5;
+uniform float cloud_height_fraction = 0.012;
+uniform float cloud_noise_scale = 5.0;
+uniform float cloud_drift_speed = 0.004;
+uniform float cloud_shadow_strength : hint_range(0.0, 1.0) = 0.45;
+
+#include "res://assets/shaders/cloud_field.gdshaderinc"
+
 // Sphere direction in surface-local (terrain) space: spin rotates the whole
 // PlanetSurface node, and patches sit under it by pure translation, so
 // VERTEX + patch_center normalized is exactly the direction the bake sampled.
@@ -93,6 +110,28 @@ void fragment() {
 		if (limb_darkening > 0.0) {
 			float ndv = clamp(dot(NORMAL, VIEW), 0.0, 1.0);
 			ALBEDO *= 1.0 - limb_darkening * (1.0 - ndv);
+		}
+
+		if (cloud_shadows) {
+			// Sun in surface-local space (the frame the cloud field lives
+			// in). Uniform scale, so the transpose is a valid inverse
+			// rotation once normalized.
+			vec3 sun_l = normalize(
+				transpose(mat3(MODEL_MATRIX)) * planet_sun_direction);
+			float ndl = dot(sdir, sun_l);
+			if (ndl > 0.02) {
+				// Where this point's sun ray crosses the cloud shell.
+				float rc = 1.0 + cloud_height_fraction;
+				float t = -ndl + sqrt(max(ndl * ndl + rc * rc - 1.0, 0.0));
+				vec3 hit = normalize(sdir + sun_l * t);
+				float a = cloud_field_alpha(
+					hit, cloud_map, cloud_has_map, cloud_coverage,
+					cloud_noise_scale, cloud_drift_speed, TIME);
+				// Fade out approaching the terminator: grazing shadows are
+				// physically enormous but the twilight band owns that region.
+				ALBEDO *= 1.0 - cloud_shadow_strength * a
+					* smoothstep(0.02, 0.2, ndl);
+			}
 		}
 
 		if (has_emissive) {

@@ -212,6 +212,13 @@ func _terminator_pair(earth: CelestialBody, moon: CelestialBody) -> void:
 ## Lower than the skim framing and tilted further down: the haze gradient over
 ## distant terrain is the aerial-perspective evidence.
 func _skim_low(body: CelestialBody) -> void:
+	# The framing hangs off the sun direction, so which terrain sits under it
+	# depends on where the spin happens to be — some runs came up over open
+	# ocean and the aerial-perspective evidence was a featureless blue sheet.
+	# Scan the day-side ring for land with the body's own height sampler and
+	# pin the framing there instead of trusting luck.
+	var sampler := body.def.surface.make_sampler()
+	var surface := body.planet_surface()
 	var resolve := func() -> Array:
 		var centre: Vector3 = OriginShift.to_render(body.true_pos)
 		var to_sun: Vector3 = (OriginShift.to_render(_system.get_body(&"sun").true_pos)
@@ -219,7 +226,23 @@ func _skim_low(body: CelestialBody) -> void:
 		var axis: Vector3 = to_sun.cross(Vector3.UP)
 		if axis.length() < 0.1:
 			axis = to_sun.cross(Vector3.RIGHT)
+		# Rings of candidates spiralling out from the subsolar point — when the
+		# sun sits over the mid-Pacific, the nearest land can be most of a
+		# quadrant away and a single narrow ring finds nothing but water.
 		var up: Vector3 = to_sun.rotated(axis.normalized(), 0.35)
+		var found := false
+		for ring in [0.35, 0.55, 0.75, 0.95]:
+			if found:
+				break
+			var base: Vector3 = to_sun.rotated(axis.normalized(), ring)
+			for k in 24:
+				var cand: Vector3 = base.rotated(to_sun, TAU * float(k) / 24.0)
+				var local: Vector3 = (
+					surface.global_transform.basis.inverse() * cand).normalized()
+				if sampler.height_normalized(local) > 0.02:
+					up = cand
+					found = true
+					break
 		var along: Vector3 = up.cross(Vector3.UP)
 		if along.length() < 0.1:
 			along = up.cross(Vector3.RIGHT)

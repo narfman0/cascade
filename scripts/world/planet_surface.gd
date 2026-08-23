@@ -611,6 +611,16 @@ func configure_clouds(
 	# Below the atmosphere shell (-15): haze composites over the clouds.
 	mat.render_priority = -16
 
+	# Cloud shadows: the surface darkens itself under the same field the deck
+	# draws (cloud_field.gdshaderinc). Both materials are parameterized HERE,
+	# from one set of values, so they can never disagree about the weather.
+	_material.set_shader_parameter("cloud_shadows", true)
+	_material.set_shader_parameter("cloud_coverage", coverage)
+	_material.set_shader_parameter("cloud_height_fraction", height_fraction)
+	if cloud_map != null:
+		_material.set_shader_parameter("cloud_map", cloud_map)
+		_material.set_shader_parameter("cloud_has_map", true)
+
 	_cloud_layer = MeshInstance3D.new()
 	_cloud_layer.name = "CloudLayer"
 	_cloud_layer.mesh = sphere

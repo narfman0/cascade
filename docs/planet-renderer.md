@@ -464,9 +464,12 @@ depends on both. Each PR is independently shippable and screenshot-reviewable.
    (2048x1024) public-domain rasters committed to `assets/planets/`, no server
    drop, no streaming. Earth, the Moon and Mars all carry real data; NYC sits on
    the real coastline.
-2. **Site list beyond NYC:** natural candidates given the tone — Cape Canaveral,
+2. ~~**Site list beyond NYC:** natural candidates given the tone — Cape Canaveral,
    Baikonur, Shanghai lights, Tycho crater base (Moon), Olympus Mons survey
-   station (Mars). Which matter enough to author?
+   station (Mars). Which matter enough to author?~~ **Answered 2026-08-23:
+   Cape Canaveral built; everything else dropped permanently by owner
+   decision.** Do not propose more sites — the owner is evaluating the two
+   that exist and will say explicitly if the system should roll out further.
 3. ~~Does relief ever need to be felt (collision)?~~ **Answered: yes — low
    skimming is wanted** (no landing yet; gravity is the blocker there). Folded
    into PR2 as the skim-collision item above.

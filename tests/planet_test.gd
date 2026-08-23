@@ -320,6 +320,19 @@ func _test_cloud_climatology() -> void:
 		"storm track and ITCZ are cloudy",
 		"(atlantic %.3f, itcz %.3f)" % [atlantic, itcz])
 
+	# Cloud shadows: the surface darkens itself under the same field the deck
+	# draws — both parameterized from configure_clouds, and only there.
+	var surf_mat: ShaderMaterial = earth.planet_surface().material()
+	_check(surf_mat.get_shader_parameter("cloud_shadows") == true
+			and surf_mat.get_shader_parameter("cloud_has_map") == true
+			and is_equal_approx(
+				surf_mat.get_shader_parameter("cloud_coverage"),
+				earth.def.cloud_coverage),
+		"the ground shadows itself under the deck's own field")
+	var moon_mat: ShaderMaterial = _system.get_body(&"moon").planet_surface().material()
+	_check(moon_mat.get_shader_parameter("cloud_shadows") == null,
+		"airless bodies cast no cloud shadows")
+
 
 func _region_mean(img: Image, lat_deg: float, lon_deg: float) -> float:
 	var w := img.get_width()
