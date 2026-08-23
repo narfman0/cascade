@@ -404,6 +404,85 @@ explicitly if the site system should ever roll out elsewhere.
 - [x] One field, one definition: the noise/threshold math moved into `assets/shaders/cloud_field.gdshaderinc`, included by BOTH the deck and the surface shader, and both materials are parameterized from `configure_clouds` alone — the shadow can never disagree with its cloud.
 - [x] Gate: surface material carries the shadow uniforms on Earth (matching the def), and `cloud_shadows` stays unset on airless bodies.
 
+## Track SL — The Sun and the Stars (designed 2026-08-23, not built)
+
+Audit findings, then the plan. What is already RIGHT and must not regress:
+one system light re-aimed every frame (the terminator is exact at the
+reference body); `light_angular_distance = 0.5°` (real-sun-soft shadows);
+stars do not twinkle (vacuum) and sit fixed on the inertial sphere; bodies
+occlude stars; the glare is depth-tested and pulled past its own disc; the
+atmosphere's in-scatter reddening is gate-validated physics.
+
+**Defects found (ordered by how wrong they are):**
+1. **No eclipse.** A ship in Earth's shadow stays fully sunlit — directional
+   shadows reach 500 m and nothing else occludes the sun. The night-side of
+   an orbit is the game's bread and butter, and it is lit wrong.
+2. **Sunlight ignores distance.** `light_energy = 1.5` at Earth AND at
+   Neptune. Real insolation falls 1/d² — Mars gets 43% of Earth's light,
+   Neptune 0.1%. The outer system should FEEL far.
+3. **The sun is ~14× too wide.** Radius 20,000 m at 300,000 m ⇒ 7.7° across
+   from Earth (the harness measures it); the real sun is 0.53°.
+4. **Direct sunlight never reddens.** The light's colour is constant white;
+   at an orbital sunrise the hull should go gold-to-red as the sun drops
+   through hundreds of kilometres of slant atmosphere. (Only the sky's
+   in-scatter reddens today.)
+5. **Scalar-alpha limb composite.** The shell multiplies the scene by a
+   luminance-average transmittance (documented compromise), so the sun and
+   city lights seen THROUGH the limb dim but never redden per-channel.
+6. **One sun direction for every body.** `planet_sun_direction` is
+   sun→origin. Correct at the reference body; wrong by tens of degrees for
+   bodies at large elongation — Venus's crescent faces the wrong way when
+   viewed across the system, and its night gate crosses the wrong meridian.
+7. **The stars are invented.** Procedural hash field — plausible magnitude
+   tail and colour spread, but no real sky: no constellations to recognize,
+   no Milky Way band. (For the Planetes tone, the real sky matters the way
+   the real coastline did.)
+8. **No sun glint on the sea.** Ocean shares land roughness (0.9); the
+   specular disc tracking the sun across the Pacific — the single most
+   recognizable sun-planet interaction from orbit — does not exist.
+
+### SL1 — Eclipse + distance-true sunlight (build first: cheap, dramatic)
+- [ ] Analytic umbra: each frame, cast the segment ship→sun in TRUE space against every body sphere between; light dims by the fraction of the sun's disc covered (angular overlap of the two discs — smooth penumbra falls out of the geometry, no shadow maps involved). Apply to `light_energy` and to the glare material's intensity through one shared factor on SolarSystem.
+- [ ] Inverse-square energy: `light_energy = 1.5 * (earth_orbit / d_sun)²`, clamped below by a playability floor (~0.12 at Neptune, owner-tunable) — the floor is a stated stylization, not a bug.
+- [ ] Gate (travel_test): park in Earth's umbra ⇒ energy < 5% of sunlit; graze the penumbra ⇒ strictly between; at Jupiter ⇒ energy matches 1/d² within the floor; the Moon eclipsing the sun dims the light at Earth.
+
+### SL2 — True-scale sun (owner call embedded: 0.53° real vs ~2° stylized)
+- [ ] Shrink `SUN_RADIUS` so the disc is 0.53° from Earth (radius ≈ 1,390 m at 300,000 m) — or the stylized compromise ~2° if the real disc reads as "just another star" in playtest. Angular size then scales correctly at every other planet for free.
+- [ ] Whiten the disc: space-sunlight is white (5772 K unfiltered); keep the warm cast ONLY where transmittance produces it (SL3/SL4). Retune glare span against the smaller disc; keep `light_angular_distance` at the real 0.53°.
+- [ ] Gate: harness measures the disc width from Earth (assert within 10% of chosen target); sun-disc chromaticity near white at high elevation.
+
+### SL3 — Sunlight through the atmosphere (direct-light reddening)
+- [ ] Each frame, when the tracked ship sits near an atmospheric body, tint the sun light by `AtmosphereMath.sample_transmittance` along the ship→sun path (CPU, the LUT already exists) — the hull goes gold at the terminator crossing and white in open space. Also drives the ambient tint it already modulates.
+- [ ] Gate (atmosphere_test): light colour R/B at sun-elevation −1° from low orbit ≥ 3× the value at +30°; in deep space exactly white; airless bodies never tint.
+
+### SL4 — Per-channel limb composite (two-pass shell)
+- [ ] Replace the shell's scalar-alpha blend with two passes: a `blend_mul` pass writing per-channel transmittance, then a `next_pass` additive pass writing in-scatter. The setting sun seen through the limb reddens and dims per-channel; city lights keep their colour through thin air. Removes the documented compromise outright.
+- [ ] Gate: screenshot the sun on the limb; CPU mirror asserts the composite formula L·T + inscatter per channel now matches the shader path.
+
+### SL5 — Per-body sun direction (correct far phases)
+- [ ] Per-body `body_sun_dir` uniform (surface material, night gate, atmosphere shell, cloud deck), set each frame from sun→body in true space; the scene DirectionalLight keeps sun→origin (exact for the ship and its reference body). `SolarSystem.sun_direction` stays for scene code.
+- [ ] Gate: Venus at max elongation shows a half phase from Earth's frame (sample its material's lit fraction analytically); the Moon's night gate crosses the sub-solar meridian of the MOON, not of the origin.
+
+### SL6 — The real sky (catalog stars + Milky Way)
+- [ ] Cook the Yale Bright Star Catalog (~9,100 stars to mag 6.5, public domain) into a small binary the sky shader can read as a texture: direction, magnitude→intensity (2.512^−m), B−V→temperature tint. Render as a baked 4k equirect HDR panorama at cook time (zero runtime cost, no seams at this star density) — Orion, the Southern Cross and the Dipper become findable, which is the Planetes move: the real sky for the same reason as the real coastline.
+- [ ] Milky Way: band from the same cook (integrated unresolved starlight by galactic latitude — procedural density model seeded by the catalog's own distribution; no third-party panorama, no licensing tail).
+- [ ] Keep the current procedural layer as the faint-star floor under the catalog. Orientation: align the catalog's equatorial frame to the ecliptic so the band crosses the orbital plane at the real ~60°.
+- [ ] Gate: Polaris sits within 1° of the spin axis's north as seen from Earth; Orion's Belt spacing matches catalog angles; total sky luminance within 2× of today's (exposure unchanged).
+
+### SL7 — Sun glint on the sea
+- [ ] Cook an ocean mask into `earth_albedo.png`'s alpha channel (land 0 / sea 1, from the same ETOPO majority rule); surface shader: sea texels get roughness ~0.15, METALLIC 0, SPECULAR 0.6 — Godot's lighting produces the tracking glint disc; polar ice gets a milder version.
+- [ ] Gate: harness shot of the glint; planet_test asserts the alpha channel land fraction matches the height map's within 2%.
+
+### SL8 (optional, owner call) — Exposure adaptation
+- [ ] Mild auto-exposure so stars wash out while the sunlit disc fills the frame and bloom back in shadow — real orbital-camera behaviour; clamp the range hard so the HUD and hull never crush. Skip if it fights readability in playtest.
+
+Ordering rationale: SL1 is the largest correctness win per line and everything
+later composes with it (eclipse feeds SL3's tinting naturally). SL2 changes
+every framing that includes the disc, so it lands before glare-dependent
+screenshots are retuned. SL4 and SL5 are pure fidelity with no new content;
+SL6 and SL7 are content cooks with existing pipelines. Each stage is
+independently shippable and screenshot-reviewable, per house rules.
+
 ## Track SD — Stations and Docking (SD1 + SD2 COMPLETE — SD3 remains stretch)
 
 Design authority: architecture.md "Stations and Docking". Read it, then this.
