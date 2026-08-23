@@ -157,11 +157,13 @@ Layered, in order of precedence at any surface point:
    scientific rasters is not the same problem. (This supersedes the earlier
    `CASCADE_Planets` raw-drop plan.)
 
-   **Deferred, on the owner's call:** tiled/streamed height data, per-region
-   high-resolution insets beyond the authored detail sites, and any runtime
-   fetch. Nothing in this design forecloses them — the height source is already
-   a layered lookup, so a streaming tier would slot in as a fourth layer above
-   the site insets — but none of that machinery gets built now.
+   **Update, 2026-08-23 (owner call): the fidelity tier is partially built.**
+   PR6 added the tiled height layer — an ETOPO tile pyramid (L1 complete at
+   effective 4096, L2 land-only at effective 8192), eagerly loaded, with the
+   sampler preferring the finest resident tile per lookup — and raised Earth's
+   albedo to 4096. See docs/tasks.md PR6 and docs/assets.md §7.3.
+   **Still deferred:** distance-based tile streaming and any runtime fetch;
+   the replace-not-mutate tile dictionary is the designed seam for both.
 3. **Site insets — small and sharp.** Each detail site may carry a small
    high-resolution height inset (e.g. 512², covering its footprint) blended
    into patches over the site radius with a smoothstep falloff, so Manhattan

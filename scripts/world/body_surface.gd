@@ -65,10 +65,21 @@ class_name BodySurface extends Resource
 ## Authored places on this surface (docs/planet-renderer.md, "Detail sites").
 @export var sites: Array[DetailSite] = []
 
+## Fidelity tier (owner-approved 2026-08-23): resource-path prefix of a cooked
+## height tile pyramid, e.g. "res://assets/planets/tiles/earth_h". Level L is a
+## 2^(L+1) x 2^L equirect grid of 1024-square tiles in the same split encoding
+## and reference elevations as the global map, so layers agree wherever both
+## exist. Tiles are sparse — all-ocean L2 tiles are not cooked — and any lookup
+## without a resident tile falls through to the global map. Empty = no tiles.
+@export var height_tile_prefix: String = ""
+
+const TILE_LEVELS: Array[int] = [2, 1]   # finest first — the sampler's order
+
 var _height_data: PackedByteArray
 var _height_w: int = 0
 var _height_h: int = 0
 var _site_insets: Array = []
+var _tiles: Dictionary = {}
 var _prepared: bool = false
 
 
@@ -87,6 +98,8 @@ func prepare(radius: float) -> void:
 		_height_data = img.get_data()
 		_height_w = img.get_width()
 		_height_h = img.get_height()
+
+	_load_height_tiles()
 
 	for site in sites:
 		if site == null:
@@ -126,6 +139,38 @@ func _cpu_image(tex: Texture2D) -> Image:
 	return img
 
 
+## Load whatever tiles the cook produced, synchronously, before any sampler
+## exists — one truth for every patch from frame zero, no cache-coherency
+## question. ~30 tiles cost well under a second at bootstrap and ~90 MB of
+## CPU-side pixels; distance-based streaming stays deferred and would slot in
+## here (replace `_tiles`, never mutate it — in-flight samplers hold snapshots).
+func _load_height_tiles() -> void:
+	if height_tile_prefix == "":
+		return
+	var loaded := {}
+	for level in TILE_LEVELS:
+		var cols: int = 1 << (level + 1)
+		var rows: int = 1 << level
+		for ty in rows:
+			for tx in cols:
+				var path := "%s_L%d_%d_%d.png" % [height_tile_prefix, level, tx, ty]
+				if not ResourceLoader.exists(path):
+					continue
+				var timg := _cpu_image(load(path) as Texture2D)
+				if timg == null:
+					continue
+				loaded["%d:%d:%d" % [level, tx, ty]] = {
+					"data": timg.get_data(),
+					"w": timg.get_width(),
+					"h": timg.get_height(),
+				}
+	_tiles = loaded
+
+
+func tile_count() -> int:
+	return _tiles.size()
+
+
 func has_authored_height() -> bool:
 	return _height_w > 0
 
@@ -147,6 +192,7 @@ class HeightSampler extends RefCounted:
 	var _w: int = 0
 	var _h: int = 0
 	var _sites: Array = []
+	var _tiles: Dictionary = {}
 
 	func _init(s: BodySurface) -> void:
 		amplitude = s.amplitude
@@ -156,6 +202,9 @@ class HeightSampler extends RefCounted:
 		_w = s._height_w
 		_h = s._height_h
 		_sites = s._site_insets
+		# Snapshot reference: the dict is replaced (never mutated) on reload,
+		# so a sampler mid-build on a worker keeps a consistent world.
+		_tiles = s._tiles
 		_fbm.noise_type = FastNoiseLite.TYPE_SIMPLEX
 		_fbm.fractal_type = FastNoiseLite.FRACTAL_FBM
 		_fbm.fractal_octaves = 5
@@ -171,7 +220,7 @@ class HeightSampler extends RefCounted:
 	func height_normalized(dir: Vector3) -> float:
 		var n: float
 		if _w > 0:
-			n = _sample_equirect(dir) * 2.0 - 1.0
+			n = _sample_authored(dir) * 2.0 - 1.0
 		else:
 			n = _fbm.get_noise_3dv(dir)
 			if _mix > 0.0:
@@ -210,6 +259,29 @@ class HeightSampler extends RefCounted:
 				site["data"], site["w"], site["h"], u, v, false) * 2.0 - 1.0
 			n = lerpf(inset, n, smoothstep(0.0, 1.0, t))
 		return n
+
+	## Authored height: the finest resident tile wins, the global map is the
+	## floor. Tiles share the global map's encoding and reference elevations,
+	## so the switch between layers is a resolution change, not a value jump.
+	func _sample_authored(dir: Vector3) -> float:
+		var lon: float = atan2(dir.z, dir.x)
+		var lat: float = asin(clampf(dir.y, -1.0, 1.0))
+		var u: float = lon / TAU + 0.5
+		var v: float = 0.5 - lat / PI
+		if not _tiles.is_empty():
+			for level in BodySurface.TILE_LEVELS:
+				var cols: int = 1 << (level + 1)
+				var rows: int = 1 << level
+				var tx: int = clampi(int(u * float(cols)), 0, cols - 1)
+				var ty: int = clampi(int(v * float(rows)), 0, rows - 1)
+				var tile: Variant = _tiles.get("%d:%d:%d" % [level, tx, ty])
+				if tile == null:
+					continue
+				return _sample_split(
+					tile["data"], tile["w"], tile["h"],
+					u * float(cols) - float(tx), v * float(rows) - float(ty),
+					false)
+		return _sample_split(_data, _w, _h, u, v, true)
 
 	## Equirect lookup in exactly the shader's convention:
 	## lon = atan2(dir.z, dir.x), lat = asin(dir.y), u = 0.5 + lon/TAU,

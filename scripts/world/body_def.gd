@@ -62,6 +62,11 @@ class_name BodyDef
 @export var cloud_height_fraction: float = 0.012
 @export var cloud_coverage: float = 0.5
 
+## Authored equirect cloud-fraction map (real climatology). Anchors WHERE the
+## clouds sit — storm tracks cloudy, deserts clear — while the shader's noise
+## provides texture and drift. Null keeps the purely procedural deck.
+@export var cloud_map: Texture2D = null
+
 ## Simulation seconds per rotation, dramatized like orbital periods. 0 = none.
 @export var spin_period: float = 0.0
 

@@ -73,11 +73,18 @@ static func build() -> Array[BodyDef]:
 		[0.85, Color(0.56, 0.53, 0.49)], [1.0, Color(0.92, 0.93, 0.95)]]))
 	earth.surface.city_lights = true
 	_authored(earth.surface, "earth")
+	# Fidelity tier: cooked ETOPO tile pyramid (L1 complete, L2 land-only) —
+	# the sampler prefers the finest resident tile and falls back per lookup.
+	earth.surface.height_tile_prefix = "res://assets/planets/tiles/earth_h"
 	earth.surface.night_emissive = _map("earth_night")
 	earth.surface.sites = [_nyc()]
 	earth.atmosphere = BodyAtmosphere.earth()
 	earth.cloud_layer = true
 	earth.cloud_coverage = 0.48
+	# Real climatology (Blue Marble cloud composite): storm tracks and the
+	# ITCZ cloudy, deserts clear — continents stay identifiable where a real
+	# photo would show them.
+	earth.cloud_map = _map("earth_clouds")
 	_spin(earth, 1800.0, 0.41)
 	bodies.append(earth)
 

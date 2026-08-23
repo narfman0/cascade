@@ -19,6 +19,13 @@ uniform float noise_scale = 5.0;
 uniform float drift_speed = 0.004;
 uniform vec3 cloud_tint : source_color = vec3(0.97, 0.97, 0.98);
 
+// Real cloud-fraction climatology (equirect, same lon/lat mapping as the
+// surface maps). It decides WHERE clouds live — storm tracks, the ITCZ —
+// while the fbm below provides texture and drift. Without it the deck is
+// uniform noise and clouds sit over the Sahara as happily as the Atlantic.
+uniform sampler2D coverage_map : filter_linear_mipmap, repeat_enable;
+uniform bool has_coverage_map = false;
+
 varying vec3 v_dir;
 
 
@@ -67,11 +74,24 @@ void fragment() {
 	vec3 p = v_dir * noise_scale
 		+ vec3(TIME * drift_speed, 0.0, TIME * drift_speed * 0.6);
 	float c = fbm(p);
-	// A hard-ish threshold gives distinct cloud fields with clear gaps —
-	// a wide soft window reads as a milky veil over the whole planet, which
-	// washes out the ocean colour from orbit. Coverage moves the cutoff.
-	float cut = mix(0.68, 0.42, coverage);
-	float a = smoothstep(cut, cut + 0.11, c);
+	float a;
+	if (has_coverage_map) {
+		float lon = atan(v_dir.z, v_dir.x);
+		float lat = asin(clamp(v_dir.y, -1.0, 1.0));
+		vec2 uv = vec2(0.5 + lon / TAU, 0.5 - lat / PI);
+		// Lift the composite's mid tones a touch, then let the noise break
+		// the fields up. Deserts (fraction ~0) can never reach the cut.
+		float base = pow(texture(coverage_map, uv).r, 0.7);
+		float d = base * (0.5 + 0.62 * c);
+		float cut = mix(0.42, 0.22, coverage);
+		a = smoothstep(cut, cut + 0.1, d);
+	} else {
+		// Purely procedural deck (bodies without climatology data). A
+		// hard-ish threshold gives distinct fields with clear gaps — a wide
+		// soft window reads as a milky veil that washes out the ocean.
+		float cut = mix(0.68, 0.42, coverage);
+		a = smoothstep(cut, cut + 0.11, c);
+	}
 	// Fade at grazing incidence: a single-layer deck seen nearly edge-on
 	// (skimming, or the last pixels of the limb) otherwise saturates into
 	// solid overcast, because every ray crosses SOME cloud within a few

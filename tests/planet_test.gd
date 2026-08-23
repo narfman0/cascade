@@ -29,6 +29,8 @@ func _ready() -> void:
 
 	_test_surfaces_exist()
 	_test_authored_maps()
+	_test_cloud_climatology()
+	_test_height_tiles()
 	_test_patch_determinism()
 	_test_seam_agreement()
 	_test_geomorph_targets()
@@ -295,6 +297,88 @@ func _test_seam_agreement() -> void:
 
 ## Spin must be a function of sim_time, never accumulated — otherwise time
 ## compression desynchronises the surface from the orbit.
+## Real cloud climatology: the deck must sit where Earth's weather actually
+## is. A random-noise deck over the Sahara is exactly what this replaces.
+func _test_cloud_climatology() -> void:
+	print("\n== cloud climatology ==")
+	var earth := _system.get_body(&"earth")
+	_check(earth.def.cloud_map != null, "Earth carries a cloud-fraction map")
+	var cloud_mat: ShaderMaterial = \
+		earth.planet_surface().cloud_layer().material_override
+	_check(cloud_mat.get_shader_parameter("has_coverage_map") == true,
+		"the deck shader is anchored to the map")
+	var img: Image = (earth.def.cloud_map as Texture2D).get_image()
+	if img.is_compressed():
+		img.decompress()
+	var sahara := _region_mean(img, 23.0, 10.0)
+	var atlantic := _region_mean(img, 55.0, -30.0)
+	var itcz := _region_mean(img, 2.0, 20.0)
+	_check(sahara < 0.1, "the Sahara is clear", "(%.3f)" % sahara)
+	_check(atlantic > 0.2 and itcz > 0.2,
+		"storm track and ITCZ are cloudy",
+		"(atlantic %.3f, itcz %.3f)" % [atlantic, itcz])
+
+
+func _region_mean(img: Image, lat_deg: float, lon_deg: float) -> float:
+	var w := img.get_width()
+	var h := img.get_height()
+	var cx := int((lon_deg + 180.0) / 360.0 * float(w))
+	var cy := int((90.0 - lat_deg) / 180.0 * float(h))
+	var sum := 0.0
+	var count := 0
+	for dy in range(-16, 17):
+		for dx in range(-16, 17):
+			var x := clampi(cx + dx, 0, w - 1)
+			var y := clampi(cy + dy, 0, h - 1)
+			sum += img.get_pixel(x, y).r
+			count += 1
+	return sum / float(count)
+
+
+## Fidelity tier: the tile pyramid must actually be consulted, agree with the
+## global layer at the coastline, and resolve relief the 2k map cannot.
+func _test_height_tiles() -> void:
+	print("\n== height tiles ==")
+	var surface := _system.get_body(&"earth").planet_surface().surface_res
+	_check(surface.tile_count() >= 30, "Earth's tile pyramid is resident",
+		"(%d tiles)" % surface.tile_count())
+	var tiled := surface.make_sampler()
+
+	# A global-map-only twin for comparison.
+	var solo := BodySurface.new()
+	solo.authored_height = load("res://assets/planets/earth_height.png")
+	solo.amplitude = surface.amplitude
+	solo.sea_level = surface.sea_level
+	solo.prepare(2000.0)
+	var global_only := solo.make_sampler()
+
+	# The Himalaya resolves sharper: the highest probe near Everest must rise
+	# above what the 2k global map can express (averaging planes the peaks).
+	var tiled_max := -2.0
+	var solo_max := -2.0
+	for dy in range(-6, 7):
+		for dx in range(-6, 7):
+			var dir := _dir(28.0 + float(dy) * 0.25, 87.0 + float(dx) * 0.25)
+			tiled_max = maxf(tiled_max, tiled.height_normalized(dir))
+			solo_max = maxf(solo_max, global_only.height_normalized(dir))
+	_check(tiled_max > solo_max,
+		"tiles resolve the Himalaya sharper than the global map",
+		"(tiled %.4f vs global %.4f)" % [tiled_max, solo_max])
+
+	# Continuity across a tile boundary (L2 tiles meet at lon 0): stepping an
+	# epsilon across it must not step the terrain.
+	var west := tiled.height_normalized(_dir(46.0, -0.005))
+	var east := tiled.height_normalized(_dir(46.0, 0.005))
+	_check(absf(west - east) < 0.02, "no step across a tile boundary",
+		"(gap %.5f)" % absf(west - east))
+
+	# The coastline datum survives the layer switch: mid-ocean stays sea,
+	# the Sahara stays land, through the tiled sampler.
+	_check(tiled.is_sea(_dir(0.0, -150.0)) and tiled.is_sea(_dir(30.0, -40.0)),
+		"oceans are still oceans through the tiles")
+	_check(not tiled.is_sea(_dir(23.0, 10.0)), "the Sahara is still land")
+
+
 ## Geomorph targets (PR5): CUSTOM0/1 must carry the parent-level surface —
 ## even vertices coincide with parent vertices exactly, odd ones sit on the
 ## parent's linear interpolation. If either drifts, LOD transitions pop, which

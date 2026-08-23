@@ -57,7 +57,8 @@ func _build_visuals() -> void:
 			def.albedo, def.roughness, def.atmosphere, def.limb_darkening
 		)
 		if def.cloud_layer:
-			_surface.configure_clouds(def.cloud_height_fraction, def.cloud_coverage)
+			_surface.configure_clouds(
+				def.cloud_height_fraction, def.cloud_coverage, def.cloud_map)
 		add_child(_surface)
 	else:
 		_build_sphere_visual()

@@ -372,6 +372,14 @@ the lighting behaviour is the requirement, not a coloured rim.
 - [x] **Sun glare** — `sun_disc.gdshader` (limb-darkened disc pushed past the tonemap white so glow blooms it) + `sun_glare.gdshader` (additive billboard halo, depth-tested so planets occlude it per-pixel, pulled camera-ward past the disc so the Sun cannot occlude its own glare). Replaces the flat cream circle.
 - [ ] More detail sites (Canaveral, Baikonur, Shanghai, Tycho, Olympus Mons) — still owner's call on which matter.
 
+### PR6 — Real clouds + Earth fidelity tier (owner-requested 2026-08-23) — BUILT
+
+- [x] **Cloud climatology** — `earth_clouds.png` cooked from the NASA Blue Marble cloud composite (L8 cloud fraction, docs/assets.md §7). The cloud shader anchors its coverage to it: `d = fraction^0.7 * (0.5 + 0.62*fbm)` against a coverage-driven cut, so storm tracks and the ITCZ are cloudy, the Sahara is clear (map means: Sahara 0.005, N-Atlantic 0.354, ITCZ 0.504), and the fbm still provides texture and TIME drift. Bodies without a map keep the procedural deck.
+- [x] **Earth height tile pyramid** — `cook_earth_tiles` cuts ETOPO 2022 at full source resolution into L1 (complete, effective 4096) + L2 (land-only, effective 8192) 1024² tiles, same encoding/references as the global map (36 tiles, ~54 MB, committed). `BodySurface` loads them eagerly in `prepare()`; the sampler prefers the finest resident tile per lookup and falls through to the global map, so sparse coverage is seamless by construction. Per-tile coastline majority rule matches the global cook.
+- [x] **Albedo ceiling raise** — `earth_albedo.png` recooked at 4096×2048 from the 5400-wide Blue Marble source (real detail, no shader change). Other bodies keep 2048 deliberately.
+- [x] Gate (`planet_test`, all green): cloud map present + shader anchored + Sahara clear + storm tracks cloudy; ≥30 tiles resident; the Himalaya resolves higher through tiles than the 2k global map; no step across a tile boundary; oceans stay oceans and the Sahara stays land through the tiled sampler.
+- [ ] Distance-based tile streaming — still deferred; the replace-not-mutate tile dictionary is the designed seam for it.
+
 ## Track SD — Stations and Docking (SD1 + SD2 COMPLETE — SD3 remains stretch)
 
 Design authority: architecture.md "Stations and Docking". Read it, then this.

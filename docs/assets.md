@@ -511,6 +511,8 @@ has to guess later which is which.
 | `mars_albedo.png` | USGS Astrogeology **Viking** colourised global mosaic, 925 m/px | real |
 | `nyc_height_inset.png` | AWS Open Data **Terrain Tiles** (terrarium encoding; SRTM/NED composite), z12 mosaic over a 29 km window at 40.75 N 73.98 W | real |
 | `nyc_night.png` | **Authored art.** A street grid on Manhattan's ~29° bearing, masked by the land/water mask of the inset above. No public night raster resolves a 29 km window | **synthetic** |
+| `earth_clouds.png` | NASA Visible Earth **Blue Marble Clouds** composite (id 57747), kept as an L8 cloud-fraction weight | real |
+| `tiles/earth_h_L{1,2}_x_y.png` | **ETOPO 2022** again, at full source resolution: the height tile pyramid (§7.3) | real |
 
 Exact URLs are in the `SOURCES` table at the top of the cook script.
 
@@ -527,9 +529,11 @@ when one is set).
   `assets/shaders/planet_surface.gdshader`. MOLA ships starting at longitude 0
   and is rolled half a turn by the cook; the SVS Moon maps and the USGS Viking
   mosaic already start at −180.
-- **2048×1024 is a ceiling, not a placeholder** (owner decision, 2026-08-17).
-  At Earth's compressed 2,000 m radius one texel spans ~6 m of *rendered*
-  surface — finer than a global map can usefully feed even depth-7 geometry.
+- **2048×1024 was the global-map ceiling** (owner decision, 2026-08-17) until
+  the fidelity tier (owner call, 2026-08-23) raised Earth specifically:
+  `earth_albedo.png` is now **4096×2048** (real detail from the 5400-wide Blue
+  Marble source), and Earth height gains the tile pyramid in §7.3. Every other
+  body keeps the 2048 ceiling, which remains correct at their view distances.
 - **Height carries 16 bits split across two 8-bit channels**: red is the high
   byte, green the low byte, `p = (R*256 + G) / 65535`. Godot's PNG importer does
   not preserve a true 16-bit greyscale PNG, and a single 8-bit channel would
@@ -554,3 +558,22 @@ when one is set).
   is squeezed into a 400 m footprint, so its vertical scale is stylized to match;
   the blend weight reaches zero at the footprint edge, so the two encodings never
   meet in a step.
+- `earth_clouds.png` is the odd one out: a plain **L8 cloud fraction**, not a
+  height map. It IS assigned to a material (the cloud shader samples it), so
+  the importer may VRAM-compress it — that is fine for a weight mask and must
+  never be taken as licence to assign the height maps.
+
+### 7.3 Earth height tile pyramid (fidelity tier, owner call 2026-08-23)
+
+`assets/planets/tiles/earth_h_L{level}_{x}_{y}.png` — equirect tiles over the
+same lon/lat mapping as the global map. Level L is a 2^(L+1) × 2^L grid of
+1024² tiles: **L1 is an effective 4096 global and is complete; L2 is an
+effective 8192 and is land-only** (all-ocean tiles are not cooked — the global
+map already carries low-frequency bathymetry). Same split-16-bit encoding and
+the **same global reference elevations**, so a tile and the global map agree
+wherever both exist and `BodySurface.HeightSampler` can hard-switch layers
+per lookup (finest resident tile wins, global map is the floor) without a
+value step. Loaded synchronously and eagerly in `BodySurface.prepare()` —
+~36 tiles, well under a second, ~90 MB of CPU-side pixels. Distance-based
+streaming remains deferred; it would replace (never mutate) the tile
+dictionary, which in-flight worker samplers snapshot by reference.

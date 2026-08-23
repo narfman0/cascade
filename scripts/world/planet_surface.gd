@@ -578,7 +578,9 @@ func atmosphere_shell() -> MeshInstance3D:
 ## Build the translucent cloud deck (PR5). Called by CelestialBody after
 ## setup for bodies whose BodyDef asks for one; hangs under this node so spin
 ## and the proxy scale carry it exactly like the shell.
-func configure_clouds(height_fraction: float, coverage: float) -> void:
+func configure_clouds(
+	height_fraction: float, coverage: float, cloud_map: Texture2D = null
+) -> void:
 	var sphere := SphereMesh.new()
 	sphere.radius = 1.0
 	sphere.height = 2.0
@@ -588,6 +590,9 @@ func configure_clouds(height_fraction: float, coverage: float) -> void:
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://assets/shaders/cloud_layer.gdshader")
 	mat.set_shader_parameter("coverage", coverage)
+	if cloud_map != null:
+		mat.set_shader_parameter("coverage_map", cloud_map)
+		mat.set_shader_parameter("has_coverage_map", true)
 	# Below the atmosphere shell (-15): haze composites over the clouds.
 	mat.render_priority = -16
 

@@ -97,6 +97,8 @@ SOURCES = {
     "mola": ("https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/"
              "mgsl_300x/meg016/megt90n000eb.img"),
     "viking": "https://planetarymaps.usgs.gov/mosaic/Mars_Viking_ClrMosaic_global_925m.tif",
+    "clouds": ("https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57747/"
+               "cloud_combined_2048.jpg"),
 }
 
 
@@ -141,8 +143,8 @@ def resize_f32(a, w=WIDTH, h=HEIGHT):
     )
 
 
-def save_rgb(img, path):
-    img = img.convert("RGB").resize((WIDTH, HEIGHT), Image.LANCZOS)
+def save_rgb(img, path, w=WIDTH, h=HEIGHT):
+    img = img.convert("RGB").resize((w, h), Image.LANCZOS)
     img.save(path, optimize=True)
     print("  wrote %s (%dx%d, RGB8)" % (path, img.width, img.height))
 
@@ -179,7 +181,10 @@ def cook_earth():
 
     save_height(encode_height(small, 8500.0, 10500.0),
                 os.path.join(OUT, "earth_height.png"))
-    save_rgb(Image.open(fetch("bluemarble")), os.path.join(OUT, "earth_albedo.png"))
+    # 4096 since the fidelity tier (owner call 2026-08-23) — keep cook_earth
+    # and cook_earth_tiles writing the same albedo so reruns cannot regress it.
+    save_rgb(Image.open(fetch("bluemarble")),
+             os.path.join(OUT, "earth_albedo.png"), 4096, 2048)
 
     # Night lights. The published Black Marble is a *composite*: warm yellow-white
     # lights painted over a blue-purple land base. Its luminance is therefore not
@@ -229,6 +234,85 @@ def cook_mars():
     # The USGS mosaic is a projected equirect whose tie point is -180 deg, so no
     # roll here -- only the odd trailing column of a 23059-wide image to ignore.
     save_rgb(Image.open(fetch("viking")), os.path.join(OUT, "mars_albedo.png"))
+
+
+def cook_earth_clouds():
+    """Real cloud climatology: the NASA Blue Marble cloud composite, kept as an
+    8-bit cloud-fraction weight the cloud shader multiplies its noise by. This
+    is what puts the ITCZ and the storm tracks where they belong and keeps the
+    deserts clear — the continents stay identifiable exactly where a real
+    photo of Earth would show them."""
+    print("Earth clouds")
+    img = Image.open(fetch("clouds")).convert("L").resize(
+        (WIDTH, HEIGHT), Image.LANCZOS)
+    a = np.asarray(img, dtype=np.float32) / 255.0
+    path = os.path.join(OUT, "earth_clouds.png")
+    Image.fromarray(np.round(np.clip(a, 0.0, 1.0) * 255.0).astype(np.uint8),
+                    mode="L").save(path, optimize=True)
+    print("  wrote %s (%dx%d, L8 cloud fraction)" % (path, WIDTH, HEIGHT))
+
+
+# --- Earth height tile pyramid (fidelity tier, owner-approved 2026-08-23) ------
+#
+# Equirect tiles over the same lon/lat mapping as the global map: level L is a
+# 2^(L+1) x 2^L grid of 1024^2 tiles, so L1 is an effective 4096 global and L2
+# an effective 8192 — both genuinely resolved by the 21600x10800 ETOPO source.
+# Same 16-bit split encoding and the same global reference elevations as
+# earth_height.png, so a tile and the global map agree wherever both exist and
+# the sampler can hard-switch between layers without a step.
+#
+# L2 tiles that are essentially all ocean are NOT cooked: the global map already
+# carries the low-frequency bathymetry, the sampler falls back per-lookup, and
+# skipping them keeps the committed set small. L1 is complete.
+
+TILE = 1024
+TILE_LEVELS = (1, 2)
+LAND_MIN_FRAC = 0.02
+
+
+def cook_earth_tiles():
+    import netCDF4
+
+    print("Earth height tiles")
+    ds = netCDF4.Dataset(fetch("etopo"))
+    lat = ds.variables["lat"][:]
+    elev = np.asarray(ds.variables["z"][:, :], dtype=np.float32)
+    if lat[0] < lat[-1]:
+        elev = elev[::-1, :]
+    ds.close()
+    grid_h, grid_w = elev.shape
+    tdir = os.path.join(OUT, "tiles")
+    os.makedirs(tdir, exist_ok=True)
+    land_hi = (elev > 0.0).astype(np.float32)
+    cooked = 0
+    skipped = 0
+    for level in TILE_LEVELS:
+        cols, rows = 2 ** (level + 1), 2 ** level
+        for ty in range(rows):
+            for tx in range(cols):
+                y0, y1 = grid_h * ty // rows, grid_h * (ty + 1) // rows
+                x0, x1 = grid_w * tx // cols, grid_w * (tx + 1) // cols
+                sub = elev[y0:y1, x0:x1]
+                subland = land_hi[y0:y1, x0:x1]
+                if level > TILE_LEVELS[0] and float(subland.mean()) < LAND_MIN_FRAC:
+                    skipped += 1
+                    continue
+                small = resize_f32(sub, TILE, TILE)
+                # Same coastline rule as the global cook: the land/sea decision
+                # comes from the full-resolution majority, not the average.
+                land = resize_f32(subland, TILE, TILE) >= 0.5
+                small = np.where(land, np.maximum(small, 1.0),
+                                 np.minimum(small, -1.0))
+                save_height(
+                    encode_height(small, 8500.0, 10500.0),
+                    os.path.join(tdir, "earth_h_L%d_%d_%d.png" % (level, tx, ty)))
+                cooked += 1
+    print("  %d tiles cooked, %d all-ocean L2 tiles skipped" % (cooked, skipped))
+    # The albedo ceiling moves with the terrain tier (owner call, 2026-08-23):
+    # 4096x2048 from the 5400-wide Blue Marble source — real detail, not
+    # upsampling, and no shader change since it stays one global texture.
+    save_rgb(Image.open(fetch("bluemarble")),
+             os.path.join(OUT, "earth_albedo.png"), 4096, 2048)
 
 
 # --- NYC detail site ----------------------------------------------------------
@@ -352,10 +436,11 @@ def cook_nyc():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", choices=["earth", "moon", "mars", "nyc"])
+    ap.add_argument("--only", choices=["earth", "moon", "mars", "nyc", "clouds", "tiles"])
     args = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
-    jobs = {"earth": cook_earth, "moon": cook_moon, "mars": cook_mars, "nyc": cook_nyc}
+    jobs = {"earth": cook_earth, "moon": cook_moon, "mars": cook_mars,
+            "nyc": cook_nyc, "clouds": cook_earth_clouds, "tiles": cook_earth_tiles}
     for name, fn in jobs.items():
         if args.only in (None, name):
             fn()
