@@ -218,6 +218,39 @@ static func build() -> Array[BodyDef]:
 	neptune.has_solid_surface = false
 	bodies.append(neptune)
 
+	# --- Minor bodies (Track LD7): asteroids sized for the ship. Gravity sits
+	# INSIDE the RCS envelope (max 0.3 vs 1.25 m/s²) — landing on one is an
+	# everyday act on lateral thrusters, and the belly jets never promote.
+	var kamo := BodyDef.make(&"kamooalewa", "Kamo'oalewa", 120.0, &"earth",
+		12000.0, 2400.0, 3.4, 0.14, Color(0.48, 0.45, 0.41),
+		"Earth's minimoon. First stop for anyone learning to land.")
+	kamo.is_minor_body = true
+	kamo.minor_seed = 41
+	kamo.surface_gravity = 0.05
+	kamo.arrival_standoff_scale = 4.0
+	_spin(kamo, 900.0, 0.2)
+	bodies.append(kamo)
+
+	var eros := BodyDef.make(&"eros", "433 Eros", 380.0, &"sun",
+		600000.0, 30000.0, 2.2, 0.05, Color(0.55, 0.50, 0.44),
+		"Belt survey waypoint. The long way out, worth the transfer.")
+	eros.is_minor_body = true
+	eros.minor_seed = 433
+	eros.surface_gravity = 0.30
+	eros.arrival_standoff_scale = 3.0
+	_spin(eros, 1400.0, 0.4)
+	bodies.append(eros)
+
+	var toutatis := BodyDef.make(&"toutatis", "Toutatis", 180.0, &"sun",
+		500000.0, 26000.0, 5.9, 0.09, Color(0.52, 0.49, 0.46),
+		"A slow tumbler. Land on it and watch the sky wheel.")
+	toutatis.is_minor_body = true
+	toutatis.minor_seed = 4179
+	toutatis.surface_gravity = 0.10
+	toutatis.arrival_standoff_scale = 3.5
+	_spin(toutatis, 500.0, 1.1)
+	bodies.append(toutatis)
+
 	return bodies
 
 

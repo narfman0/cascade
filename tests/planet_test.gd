@@ -65,13 +65,17 @@ func _check(ok: bool, label: String, detail: String = "") -> void:
 func _test_surfaces_exist() -> void:
 	print("\n== surfaces ==")
 	var with_surface: int = 0
+	var expected: int = 0
 	for body in _system.bodies:
 		if body.planet_surface() != null:
 			with_surface += 1
-	# Every body except the Sun, which keeps its emissive sphere.
-	_check(with_surface == _system.bodies.size() - 1,
-		"every body but the Sun has a surface",
-		"(%d of %d)" % [with_surface, _system.bodies.size()])
+		# The Sun keeps its emissive sphere; minor bodies (LD7) carry their
+		# own displaced-rock mesh instead of the planet renderer.
+		if not body.def.emissive and not body.def.is_minor_body:
+			expected += 1
+	_check(with_surface == expected,
+		"every planet and moon has a surface",
+		"(%d of %d)" % [with_surface, expected])
 	_check(_system.get_body(&"sun").planet_surface() == null,
 		"the Sun kept its plain emissive sphere")
 

@@ -375,7 +375,11 @@ func _altitude_above_terrain(body: CelestialBody) -> float:
 		return (global_position - hit.position).dot(up_w)
 	var surface = body.planet_surface()
 	if surface == null:
-		return INF
+		# Minor bodies have no PlanetSurface — the trimesh raycast above is
+		# the ground truth there. If it missed, use the analytic radius: near
+		# the mean surface that is close enough to trigger entry; high up it
+		# is honestly large.
+		return (global_position - body.global_position).length() - body.def.radius
 	_walk_sampler_age += 1
 	if _walk_sampler == null or _walk_sampler_age > 300:
 		_walk_sampler = surface.surface_res.make_sampler()

@@ -605,7 +605,7 @@ along appropriate axes." Built as scoped, all in-engine:
 - [ ] EVA suit thruster puffs: stretch, same pattern at MMU scale — folds
   into Track AN's suit pass.
 
-## Track LD7 — Minor-body landing: asteroids sized for the ship (QUEUED 2026-08-24, owner-requested)
+## Track LD7 — Minor-body landing: asteroids sized for the ship (BUILT 2026-08-24)
 
 "Details when landing on sufficiently small asteroids where the ship is
 designed within that amount of gravity." The sweet spot the owner is naming:
@@ -635,9 +635,30 @@ planet demands. Design decisions to build against:
   minor bodies as destinations with honest standoffs.
 - Seed 2–3 of them: one near the spawn debris field (the tutorial asteroid),
   one in a distinct orbit worth a transfer, one tumbling.
-- Gates: land/takeoff on a minor body via the full descent path; hover on
-  RCS alone (belly jets never promoted); EVA jump ballistics under micro-g;
-  co-rotation on the tumbling one; all existing suites green.
+- [x] BUILT: `MinorBody extends CelestialBody` — displaced-rock mesh hugging
+  def.radius (±12%; the first cut squashed to 0.65 R and every altitude lie
+  followed), trimesh collision of the same geometry, WHOLE-NODE spin so a
+  landed hull and a walking suit co-rotate through the tree. Three seeded:
+  Kamo'oalewa (Earth minimoon, g 0.05, the tutorial), 433 Eros (belt, 0.30),
+  Toutatis (tumbler, spin 500 s at 63° tilt). Belly-jet promotion now gates
+  on g > 1.0 m/s² — on minor bodies and the Moon the ship hovers on RCS
+  alone, as designed. EVA hovers at the hatch on FA (jetpack beats the well
+  — descending is a choice); jump apex gated 8.2 m vs v²/2g's 7.6.
+- [x] The build's big find (now in LandingComputer for EVERY body): capture
+  by PROXIMITY, not contact — on a 20° slope the 13 m hull's nose reaches
+  ground 2.4 m before the centre line, and a live nose-strike is a solver
+  tumble (measured +12 m/s on Eros). Capture fires at 3 m ray clearance
+  while nothing can touch, then SETTLES the frozen hull to 0.3 m. Trap #9's
+  third verse.
+- [x] Autoland lands minor bodies (same landable query — free, as predicted);
+  its touchdown handoff hardened: stand down if the hull is frozen by
+  another system (a test raced LD4's capture and left autoland flying a
+  ghost mission that re-enabled FA a full test later).
+- [x] Gates: `tests/minor_body_test.gd` (26 checks) — class/envelope/standoffs,
+  RCS-only FA hover (0.013 m/s drift), autoland touchdown on Eros, tumbling
+  co-rotation exact over 37 sim-s, EVA walk + micro-g jump. planet_test's
+  "every body has a surface" gate updated for the new class. Evidence:
+  24_landed_asteroid (LANDED — 433 Eros, the whole horizon in frame).
 
 ## Track AL — Autoland (BUILT 2026-08-24)
 

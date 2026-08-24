@@ -76,6 +76,12 @@ class_name BodyDef
 ## Where the autopilot parks, as a multiple of `radius` from the centre.
 @export var arrival_standoff_scale: float = 2.5
 
+## Minor body (Track LD7): an asteroid sized for the ship — displaced-rock
+## mesh, trimesh collision at true scale, whole-node spin, tiny shell.
+@export var is_minor_body: bool = false
+## Deterministic mesh seed for minor bodies.
+@export var minor_seed: int = 1
+
 ## Whether there is ground to land on (Track HZ). Gas giants and the Sun have
 ## gravity but no surface capture: their shells are pure hazard — descend past
 ## the cloud deck / corona and the hull is lost, not landed.

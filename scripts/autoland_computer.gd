@@ -110,6 +110,11 @@ func _physics_process(_delta: float) -> void:
 	if target_body == null or not is_instance_valid(target_body):
 		abort("target lost")
 		return
+	# Another system owns the hull (docked, restored, harness hold): a frozen
+	# ship is not ours to fly.
+	if _ship.freeze:
+		abort("hull taken")
+		return
 	# Climbed out of the shell (or never should have been here): stand down.
 	if _system.landable_body_at(OriginShift.to_true(_ship.global_position)) != target_body:
 		abort("left the gravity shell")

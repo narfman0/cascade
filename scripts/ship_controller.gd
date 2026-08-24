@@ -129,7 +129,10 @@ func _physics_process(delta: float) -> void:
 	# less than Earth's 2.45, so without this no upright hover, no braked
 	# descent, and no landing exists at all. Deep-space RCS feel is untouched;
 	# the jets light only where there is a surface to land on.
-	if gravity != Vector3.ZERO:
+	# ...but only where the RCS genuinely cannot fight the well (LD7): on a
+	# minor body (g ≤ 0.3) or the Moon (0.4) the 1.25 m/s² RCS hovers fine,
+	# and landing stays the everyday lateral-thruster act it should be.
+	if gravity.length() > 1.0:
 		max_axis.y = thrust_main
 
 	var thrust_local := Vector3(

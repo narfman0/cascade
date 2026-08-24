@@ -19,6 +19,15 @@ signal lifted(body_name: String)
 @export var touchdown_tilt_limit_deg: float = 25.0
 ## Hold thrust_up this long to lift off — deliberate, not a bumped key.
 @export var takeoff_hold_seconds: float = 0.4
+## Proximity-capture: latch when the belly is this close to the ground while
+## slow and upright (the ray fallback that beats the solver to the touch).
+## Sized for the hull's FOOTPRINT, not its belly: on a 20° slope the 13 m
+## hull's nose reaches ground 2.4 m before the centre line does, and a live
+## nose-strike is a solver tumble (measured on Eros). Capture fires while no
+## extremity can yet touch; _capture then settles the frozen hull down.
+@export var capture_clearance: float = 3.0
+## Ship centre to belly, metres (the 1.8× hull's half-height).
+@export var belly_offset: float = 2.75
 ## Separation kick along local up on release — the undock push-off precedent.
 ## Load-bearing, not flavor: a live hull left resting in contact with the
 ## skim colliders (which teleport with the spinning surface every frame) is
@@ -62,7 +71,9 @@ func _physics_process(delta: float) -> void:
 		_capture_armed = true
 		return
 	if not _capture_armed:
-		_clear_frames = _clear_frames + 1 if not _ground_contact(body) else 0
+		var clear: bool = not _ground_contact(body) \
+			and _ground_clearance(body) > capture_clearance + 0.5
+		_clear_frames = _clear_frames + 1 if clear else 0
 		if _clear_frames >= 10:
 			_capture_armed = true
 		return
@@ -70,7 +81,13 @@ func _physics_process(delta: float) -> void:
 
 
 func _try_capture(body: CelestialBody) -> void:
-	if not _ground_contact(body):
+	# Proximity OR contact — trap #9's ship verse: a live hull's first real
+	# contact with a teleporting collider can solver-bounce it at >10 m/s
+	# before this computer ever reads a calm contact frame (measured on the
+	# Eros trimesh). The raycast catches the ground at belly clearance while
+	# the descent is still calm; the contact path stays as a fallback.
+	var clearance: float = _ground_clearance(body)
+	if not _ground_contact(body) and clearance > capture_clearance:
 		return
 	var v_rel: Vector3 = _ship.linear_velocity - surface_point_velocity(body, _ship.global_position)
 	if v_rel.length() > touchdown_speed_limit:
@@ -78,7 +95,20 @@ func _try_capture(body: CelestialBody) -> void:
 	var local_up: Vector3 = (_ship.global_position - body.global_position).normalized()
 	if _ship.global_basis.y.dot(local_up) < cos(deg_to_rad(touchdown_tilt_limit_deg)):
 		return
-	_capture(body)
+	_capture(body, clearance)
+
+
+## Distance from the hull's underside to the ground along local down, INF on
+## a miss. Ray starts at the ship centre; the belly sits ~2.8 m below it.
+func _ground_clearance(body: CelestialBody) -> float:
+	var up: Vector3 = (_ship.global_position - body.global_position).normalized()
+	var q := PhysicsRayQueryParameters3D.create(
+		_ship.global_position, _ship.global_position - up * 12.0)
+	q.exclude = [_ship.get_rid()]
+	var hit: Dictionary = _ship.get_world_3d().direct_space_state.intersect_ray(q)
+	if hit.is_empty():
+		return INF
+	return (_ship.global_position - (hit.position as Vector3)).dot(up) - belly_offset
 
 
 ## Any current contact whose collider belongs to this body — the skim patches
@@ -94,8 +124,13 @@ func _ground_contact(body: CelestialBody) -> bool:
 	return false
 
 
-func _capture(body: CelestialBody) -> void:
+func _capture(body: CelestialBody, clearance: float = 0.0) -> void:
 	_undocked_parent = clamp_to_surface(_ship, body)
+	# Settle: the proximity capture fires with air under the belly — the tree
+	# owns the frozen hull now, so lower it to rest (0.3 m skid clearance).
+	if clearance > 0.3 and clearance < 100.0:
+		var up: Vector3 = (_ship.global_position - body.global_position).normalized()
+		_ship.global_position -= up * (clearance - 0.3)
 	landed_body = body
 	_takeoff_hold = 0.0
 	GameState.landed = true

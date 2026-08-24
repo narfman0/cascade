@@ -83,7 +83,13 @@ func refresh() -> void:
 func _build() -> void:
 	var defs: Array[BodyDef] = SolarSystemData.build()
 	for def in defs:
-		var body := CelestialBody.new()
+		var body: CelestialBody
+		if def.is_minor_body:
+			var mb := MinorBody.new()
+			mb.mesh_seed = def.minor_seed
+			body = mb
+		else:
+			body = CelestialBody.new()
 		body.setup(def)
 		add_child(body)
 		bodies.append(body)
