@@ -296,6 +296,84 @@ This is why the EVA suit is **removed from the scene tree** while the player is 
 
 Related: the physics server owns a live `RigidBody3D`'s transform and reverts writes from script. Setting the ship's transform or basis only works while it is frozen, which is why the autopilot freezes before steering.
 
+## Landing (Track LD — designed, awaiting owner approval; see tasks.md)
+
+Two tiers, because the physics regimes are genuinely different: at debris and
+asteroid masses gravity is negligible and "landing" is contact-and-latch; at
+planet scale it is a gravity well and a spinning surface. Everything below
+reuses a pattern this project has already paid for.
+
+### Tier 1 — rocks: contact + anchor
+
+**Asteroids/heavy debris are a new class, `SpaceRock`:** RigidBody3D at prop
+scale (2–50 m, 0.5–20 t), procedural rock mesh with convex collision, tumbling.
+The first free-physics bodies in the world besides the ship and the suit.
+
+**Sleep on rails, wake to physics.** A dynamic body cannot ride an
+`OrbitalAnchor` (the write-back fight), but a rock left dynamic in LEO drifts
+off its field as Earth's frame velocity rotates. So rocks sleep as
+kinematic-follow props under their field anchor, and wake into free physics —
+with the anchor frame's velocity handed off, the EVA-exit pattern — when the
+player closes within a wake radius (~500 m). Fields manage respawn/cull;
+a woken rock far from any player interest goes back to sleep by re-anchoring.
+
+**Anchoring is a joint, not a reparent.** Latching (ship magnetic clamps, suit
+boot clamps) creates a locked `Generic6DOFJoint3D` between the two bodies.
+Both stay independent bodies in the physics space, so the never-nest rule is
+not violated, and a jointed suit rides a tumbling rock's rotation for free.
+Latch conditions mirror soft-capture: contact plus relative velocity under
+~0.5 m/s. Unlatch on input; the joint also breaks past a force limit, so
+towing a rock heavier than your clamps is a gameplay fact, not a clip.
+Because the ship (12 t) and rocks (0.5–20 t) couple through the joint,
+thrusting while latched tows the pair — which is exactly the M3 deorbit
+loop: latch debris, drag it to disposal, release.
+
+**EVA on a rock:** clamped suit = jointed suit; controls stay MMU (torque
+only while clamped — translation thrust above the break limit is how you
+push off). Walking is a non-goal at every tier.
+
+### Tier 2 — planets: a gravity shell and a landed state
+
+**Gravity is a surface shell, NOT a global field.** The system's rails are
+dramatized: Meridian Relay's rail speed at 9 km bears no relation to circular
+orbital speed for any honest g(r), so a global field would make every parked
+ship, station approach, and debris field fall out of the sky. Instead each
+solid body gets a shell from its surface up to `1.5 R`: inverse-square inside,
+smoothly faded to zero across the top of the shell. Autopilot arrival
+standoffs sit outside every shell, so transfers, parks, stations, fields, and
+all existing suites are untouched by construction. `SolarSystem.gravity_at
+(true_pos)` is the single query; the ship and suit apply it as a force in
+`_physics_process`, and the autopilot's 64-bit integrator adds the same term
+(closed-loop guidance then handles it, but it never matters if standoffs stay
+outside). The autopilot refuses to engage from inside a shell — take off
+first, manually.
+
+**Surface gravity is dramatized ×0.25, like every other number here.** Real
+g₀ against the 4 m/s² main engine gives Earth a thrust-to-weight of 0.4 —
+unlandable. At ×0.25 (Earth 2.45, Mars 0.93, Moon 0.40 m/s²) the ship lands
+on Earth at TWR 1.6 (lunar-module feel) and the suit (2.0 m/s² of thrust)
+still cannot hover on Earth but flies freely on the Moon — EVA capability
+becomes a per-body fact. Gas giants get no shell and no landing; the nav
+console says why.
+
+**Landed is a state, not a contact.** Touchdown capture mirrors docking
+soft-capture: contact with the skim colliders, surface-relative speed under
+~2 m/s, ship's up within ~25° of local up — otherwise you bounce. On capture
+the ship freezes, leaves the physics space (`body_set_space(RID())`), leaves
+`origin_shiftable`, and records its pose in surface-local coordinates; each
+frame it is placed by the same transform chain that carries detail sites
+(`site_transform` precedent), so a landed ship co-rotates with the spinning
+surface and survives origin shifts by construction. Takeoff reverses it with
+the surface point's velocity (body frame + spin ω×r) handed off — the
+EVA-exit pattern a third time.
+
+**Scale honesty bounds the ground game.** Earth's radius is 2,000 m and the
+albedo is 6 m/texel; landing v1 is: descend through the atmosphere (aerial
+perspective and reddened light already exist), touch down, look around, take
+off. The two detail sites are the only "places". No walking, no ground
+content — that is a later, owner-approved scope, not an implication of this
+track.
+
 ## No ECS
 
 At Cascade's scale, Godot's node tree is sufficient. Do not introduce an ECS framework. Keep systems as Autoloads or manager nodes with clear responsibilities. Prefer composition (nodes-as-components) over inheritance chains.

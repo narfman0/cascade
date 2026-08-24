@@ -4,9 +4,13 @@ _This file is populated by agents. Do not edit manually._
 
 **Ordering directive (from project owner, updated 2026-08-17):** Implementation
 order is now **Track SD (stations + docking) first, then Track PR (planet
-renderer)**. M3 (debris/tools/contracts) remains gated on the M1/M2 human feel
-checks. The original directive stands underneath: model 3D flight accurately;
-movement correctness before content.
+renderer)**. The original directive stands underneath: model 3D flight
+accurately; movement correctness before content.
+
+**Flight feel SIGNED OFF by owner 2026-08-23** ("flight feel is good") — the
+M1/M2 human-feel gate on M3 is satisfied. M3 (debris/tools/contracts) is now
+unblocked and is the main line once Track LD's plan is approved; LD Tier 1
+(rocks + latching) is deliberately shaped to BE the M3 debris substrate.
 
 **Running the suites:** all six exit cleanly and fast — travel ~8 s, docking
 ~7 s, eva ~8 s, station ~12 s, planet ~127 s, atmosphere ~35 s, every one exit 0. If a suite ever
@@ -404,38 +408,52 @@ explicitly if the site system should ever roll out elsewhere.
 - [x] One field, one definition: the noise/threshold math moved into `assets/shaders/cloud_field.gdshaderinc`, included by BOTH the deck and the surface shader, and both materials are parameterized from `configure_clouds` alone — the shadow can never disagree with its cloud.
 - [x] Gate: surface material carries the shadow uniforms on Earth (matching the def), and `cloud_shadows` stays unset on airless bodies.
 
-### OR5 — PLAN: landing (queued 2026-08-23, owner-requested)
+### OR5 — landing plan DELIVERED 2026-08-23 → Track LD below (awaiting owner approval)
 
-A design task, not an implementation task: produce the plan (architecture.md
-addition + an implementation-ready track here) for making things LANDABLE, in
-two tiers. Bring the plan to the owner before building anything.
+The design questions queued here are all answered in **architecture.md §
+Landing**; the implementation-ready breakdown is **Track LD**. Nothing is
+built. Owner approves the plan (or amends it) before LD1 starts.
 
-**Tier 1 — small/medium debris and asteroids.** At these masses real gravity
-is negligible, so "landing" is CONTACT + ANCHOR, not orbits: kill relative
-velocity, touch, latch (Planetes-style boot clamps / grapple anchor), and
-become one body with the target. Design questions the plan must answer:
-- Anchoring model: joint? reparent? kinematic follow? (Beware the nested
-  RigidBody3D trap — the standing rule — and the frozen-kinematic write-back
-  problem for anything riding a rail-driven parent.)
-- Asteroids do not exist yet: they need a body class (procedural mesh +
-  trimesh collision, tumbling — the first RIGID bodies on rails-free physics
-  at prop scale), probably seeded near stations/fields for M3 contracts.
-- EVA on a tumbling rock: the suit anchoring + surface-relative controls.
+## Track LD — Landing (PLANNED 2026-08-23; build gated on owner approval)
 
-**Tier 2 — landable planets.** The blockers noted at PR2 stand: there is NO
-gravity anywhere (`default_gravity = 0`, bodies exert none) and no landed
-reference frame. The plan must cover:
-- A local gravity model near bodies (radial force inside an influence shell,
-  or curved-space cheat) that does NOT break the Newtonian flight rules, the
-  autopilot's brachistochrone assumptions, or flight assist.
-- The landed frame: a landed ship must ride the SPINNING surface (the same
-  co-rotation the detail-site anchors get for free under PlanetSurface) and
-  the floating origin must tolerate a ship glued to a rail-driven surface.
-- Touchdown physics against trimesh skim patches (CCD already exists),
-  landing legs vs the 2%-of-radius relief, takeoff, and the atmosphere
-  descent presentation (aerial perspective + reddened light already exist).
-- Scale honesty: at 2,000 m radius Earth, "landing" happens on a 6 m/texel
-  albedo — decide what the ground game actually is before promising one.
+Full design rationale in architecture.md § Landing. Decisions in one breath:
+rocks are a new free-physics class that sleeps on rails and wakes with a
+velocity handoff; latching is a locked Generic6DOF joint (never a reparent);
+planetary gravity is a per-body surface SHELL to 1.5 R (a global field is
+impossible against dramatized rails — Meridian Relay would fall), dramatized
+×0.25 so the 4 m/s² main lands Earth at TWR 1.6; landed is the docking-capture
+pattern anchored by the site-transform chain, takeoff is the EVA-exit velocity
+handoff. Suit hovers on the Moon, not on Earth — on purpose. Gas giants: no.
+
+### LD1 — SpaceRock class + fields
+- [ ] `SpaceRock` (RigidBody3D): procedural rock mesh + convex collision, sizes 2–50 m, masses 0.5–20 t, spin seeded.
+- [ ] Sleep-on-rails: kinematic follow under the field's `OrbitalAnchor`; wake within ~500 m of the player with anchor-frame velocity handed off; re-sleep when abandoned.
+- [ ] Field spawner config on `OrbitalAnchor` fields (count, size/mass ranges, seed) — the M3 debris substrate.
+- [ ] Gates (`tests/anchor_test.gd`, new suite): woken rock co-moves with its field (< 0.1 m/s error), tumble persists, sleeping rock tracks the anchor under warp.
+
+### LD2 — Latching (ship clamps + suit boots)
+- [ ] Latch: contact + relative velocity < 0.5 m/s + input → locked `Generic6DOFJoint3D`. Unlatch on input; force-limit break (clamp rating vs towed mass).
+- [ ] Suit boot clamps: same joint; torque-only control while clamped; push off by exceeding the break limit.
+- [ ] HUD: latch-ready indicator (the docking-computer pattern), latched-state readout.
+- [ ] Gates: latch succeeds under threshold and refuses over it; ship+rock couple tows under thrust with combined-mass acceleration; release is impulse-clean; jointed suit rides a tumbling rock.
+
+### LD3 — Gravity shells
+- [ ] `SolarSystem.gravity_at(true_pos)`: inverse-square inside each solid body's shell (surface → 1.5 R), smooth fade at the top, zero elsewhere; per-body `surface_gravity` in `SolarSystemData` at ×0.25 real (Earth 2.45, Mars 0.93, Moon 0.40 m/s²); gas giants none.
+- [ ] Ship + suit apply it in `_physics_process`; flight assist gains a gravity feed-forward term so station-keeping in a shell holds altitude without sag.
+- [ ] Autopilot: integrator adds the same term; engagement refused from inside a shell ("TAKE OFF FIRST").
+- [ ] Gates (travel + new checks): field values at R/1.2 R/1.6 R (zero), every arrival standoff outside every shell, FA hover drift < 0.2 m/s, all existing transfer gates unchanged.
+
+### LD4 — Touchdown + the landed state
+- [ ] Capture: skim-collider contact + surface-relative speed < 2 m/s + up-alignment < 25°, else bounce. On capture: freeze, `body_set_space(RID())`, leave `origin_shiftable`, record surface-local pose.
+- [ ] Landed placement each frame via the site-transform chain — co-rotation for free; verify against a surface point over half a spin period (the site antipodal-test pattern).
+- [ ] Takeoff: re-enter space at the anchor pose with surface-point velocity (frame + ω×r) handed off; a thrust-up hold triggers it.
+- [ ] EVA while landed: exit works, suit falls under shell gravity, boot-clamp latch to the ground = LD2 path; Moon EVA flies, Earth EVA stays clamped (TWR < 1) — assert both.
+- [ ] Gates (`tests/landing_test.gd`, new suite): scripted descent → landed on Earth and Moon, co-rotation tracks, takeoff clean (no teleport frame, velocity error < 0.1 m/s), origin shift while landed does not move the ship relative to the surface, all six existing suites green.
+
+### LD5 — Descent presentation + HUD (polish, after LD4 proves out)
+- [ ] Radar altimeter + surface-relative velocity vector on the HUD inside shells (the numbers that make a landing flyable).
+- [ ] Descent look: existing aerial perspective + reddened terminator light already carry it; add only camera shake ramp on shell entry if it reads as nothing otherwise. No new shader work.
+- [ ] Scope statement honored: land, look, take off. No walking, no ground content — a later owner-approved track if ever.
 
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 
