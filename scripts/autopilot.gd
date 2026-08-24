@@ -102,9 +102,10 @@ func can_engage() -> bool:
 func engage(destination: NavTarget) -> bool:
 	if not can_engage() or destination == null:
 		return false
-	# Inside a gravity shell the analytic transfer's frozen-hull assumption is
-	# a lie — the well owns you until you climb out of it, by hand (LD3).
-	if _system.landable_body_at(OriginShift.to_true(_ship.global_position)) != null:
+	# Inside ANY gravity shell — landable or a gas giant's — the analytic
+	# transfer's frozen-hull assumption is a lie: the well owns you until you
+	# climb out of it, by hand (LD3/HZ).
+	if _system.shell_body_at(OriginShift.to_true(_ship.global_position)) != null:
 		cancelled.emit("in gravity well — climb above the shell first")
 		return false
 	target = destination

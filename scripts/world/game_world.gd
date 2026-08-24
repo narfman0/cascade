@@ -97,6 +97,10 @@ func _wire_systems() -> void:
 	if landing:
 		landing.setup(_system)
 
+	var hazard := _ship.get_node_or_null("HazardMonitor") as HazardMonitor
+	if hazard:
+		hazard.setup(_system)
+
 	# Stations register after the origin exists — registration places them, so
 	# doing it from a station's own _ready would race the bootstrap.
 	var station := get_node_or_null("MeridianRelay") as OrbitalStation

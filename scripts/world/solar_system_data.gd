@@ -129,6 +129,8 @@ static func build() -> Array[BodyDef]:
 	# limb-softening term only (docs/planet-renderer.md, per-body table).
 	jupiter.limb_darkening = 0.65
 	_spin(jupiter, 900.0, 0.05)
+	jupiter.surface_gravity = 6.20
+	jupiter.has_solid_surface = false
 	bodies.append(jupiter)
 
 	var io := BodyDef.make(&"io", "Io", 480.0, &"jupiter",
@@ -177,6 +179,8 @@ static func build() -> Array[BodyDef]:
 		[0.7, Color(0.94, 0.89, 0.75)], [1.0, Color(0.80, 0.72, 0.55)]]))
 	saturn.limb_darkening = 0.6
 	_spin(saturn, 1000.0, 0.47)
+	saturn.surface_gravity = 2.61
+	saturn.has_solid_surface = false
 	bodies.append(saturn)
 
 	var titan := BodyDef.make(&"titan", "Titan", 720.0, &"saturn",
@@ -198,6 +202,8 @@ static func build() -> Array[BodyDef]:
 		[1.0, Color(0.66, 0.84, 0.86)]]))
 	uranus.limb_darkening = 0.5
 	_spin(uranus, 1500.0, 1.71)   # rolls on its side, like the real thing
+	uranus.surface_gravity = 2.22
+	uranus.has_solid_surface = false
 	bodies.append(uranus)
 
 	var neptune := BodyDef.make(&"neptune", "Neptune", 3800.0, &"sun",
@@ -208,6 +214,8 @@ static func build() -> Array[BodyDef]:
 		[0.75, Color(0.42, 0.56, 0.86)], [1.0, Color(0.72, 0.80, 0.95)]]))
 	neptune.limb_darkening = 0.55
 	_spin(neptune, 1400.0, 0.49)
+	neptune.surface_gravity = 2.79
+	neptune.has_solid_surface = false
 	bodies.append(neptune)
 
 	return bodies
@@ -224,6 +232,11 @@ static func _sun() -> BodyDef:
 	sun.emission_energy = 30.0
 	sun.arrival_standoff_scale = 6.0
 	sun.is_destination = false
+	# The Sun pulls (Track HZ): ×0.25 real is 68.5 m/s² — no engine climbs
+	# out of that. Flying into the corona is the one hazard with no warning
+	# band that is winnable, which is why the standoff is 6 R.
+	sun.surface_gravity = 68.5
+	sun.has_solid_surface = false
 	return sun
 
 

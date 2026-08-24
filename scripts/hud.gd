@@ -27,6 +27,9 @@ extends CanvasLayer
 @onready var _landing_hspd: Label = $Root/LandingPanel/LandingHspd
 @onready var _landed_label: Label = $Root/LandedLabel
 @onready var _latch_label: Label = $Root/LatchLabel
+@onready var _hazard_label: Label = $Root/HazardLabel
+@onready var _fail_overlay: ColorRect = $Root/FailOverlay
+@onready var _fail_label: Label = $Root/FailOverlay/FailLabel
 
 ## Modulates for the approach readout: a line flips to the settled tint when its
 ## value is inside capture tolerance. Calm per tone — no red anywhere.
@@ -52,6 +55,10 @@ func _ready() -> void:
 		if _character == null:
 			_character = _ship.get_node_or_null("Character") as RigidBody3D
 		_docking = _ship.get_node_or_null("DockingComputer") as DockingComputer
+		var hazard := _ship.get_node_or_null("HazardMonitor") as HazardMonitor
+		if hazard:
+			hazard.hull_lost.connect(_on_hull_lost)
+			hazard.restored.connect(_on_hazard_restored)
 	GameState.flight_assist_changed.connect(_on_flight_assist_changed)
 	GameState.input_mode_changed.connect(_on_input_mode_changed)
 	_on_flight_assist_changed(GameState.flight_assist_enabled)
@@ -104,6 +111,7 @@ func _process(_delta: float) -> void:
 	_update_docking_readout()
 	_update_landing_readout(active)
 	_update_latch_readout()
+	_update_hazard_readout()
 
 	if GameState.input_mode == GameState.InputMode.EVA:
 		_update_eva_readouts()
@@ -247,6 +255,45 @@ func _update_latch_readout() -> void:
 		_latch_label.visible = true
 	else:
 		_latch_label.visible = false
+
+
+## Track HZ: the calm warning line. Informative, never a klaxon — the text
+## carries the number that matters (spare acceleration against the well).
+func _update_hazard_readout() -> void:
+	var hazard: HazardMonitor = null
+	if _ship:
+		hazard = _ship.get_node_or_null("HazardMonitor") as HazardMonitor
+	if hazard == null or hazard.band == HazardMonitor.Band.CLEAR:
+		if _hazard_label:
+			_hazard_label.visible = false
+		return
+	var body_name: String = hazard.band_body.nav_display_name() if hazard.band_body else ""
+	match hazard.band:
+		HazardMonitor.Band.CAUTION:
+			_hazard_label.text = "GRAVITY WELL — %s   escape margin %.1f m/s²" % [
+				body_name, hazard.escape_margin]
+			_hazard_label.modulate = Color(0.92, 0.82, 0.55)
+		HazardMonitor.Band.WARNING:
+			_hazard_label.text = "WARNING — %s well   escape margin %.1f m/s²" % [
+				body_name, hazard.escape_margin]
+			_hazard_label.modulate = Color(0.95, 0.65, 0.4)
+		HazardMonitor.Band.NO_RETURN:
+			_hazard_label.text = "POINT OF NO RETURN — %s" % body_name
+			_hazard_label.modulate = Color(0.95, 0.45, 0.35)
+	_hazard_label.visible = true
+
+
+func _on_hull_lost(reason: String) -> void:
+	_fail_label.text = "HULL LOST — %s" % reason
+	_fail_label.visible = true
+	var tween := create_tween()
+	tween.tween_property(_fail_overlay, "color:a", 0.92, 0.9)
+
+
+func _on_hazard_restored() -> void:
+	_fail_label.visible = false
+	var tween := create_tween()
+	tween.tween_property(_fail_overlay, "color:a", 0.0, 1.2)
 
 
 func _update_interact_prompt_ship() -> void:

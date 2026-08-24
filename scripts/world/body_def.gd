@@ -76,6 +76,11 @@ class_name BodyDef
 ## Where the autopilot parks, as a multiple of `radius` from the centre.
 @export var arrival_standoff_scale: float = 2.5
 
+## Whether there is ground to land on (Track HZ). Gas giants and the Sun have
+## gravity but no surface capture: their shells are pure hazard — descend past
+## the cloud deck / corona and the hull is lost, not landed.
+@export var has_solid_surface: bool = true
+
 ## Surface gravity in m/s², dramatized ×0.25 of the real value (Track LD3): the
 ## 4 m/s² main engine must land Earth at a flyable thrust-to-weight (1.6 here;
 ## real g gives 0.4 — unlandable). Zero means no gravity shell and no landing:

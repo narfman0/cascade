@@ -76,7 +76,15 @@ func _test_field_values() -> void:
 	_check(absf(_g_at(moon, 1.0) - 0.40) < 0.01, "Moon surface gravity",
 		"%.2f m/s²" % _g_at(moon, 1.0))
 	var jupiter := _system.get_body(&"jupiter")
-	_check(_g_at(jupiter, 1.1) == 0.0, "gas giants have no shell")
+	# Track HZ changed the rule: gas giants PULL (Jupiter 6.2 at the deck,
+	# more than the main engine) — they just never capture. Landability is
+	# the landable_body_at filter's job now, gated in hazard_test.
+	_check(_g_at(jupiter, 1.1) > 4.0, "gas giants pull harder than the main engine",
+		"%.2f m/s²" % _g_at(jupiter, 1.1))
+	_check(_system.landable_body_at([
+		jupiter.true_pos[0] + jupiter.def.radius * 1.1,
+		jupiter.true_pos[1], jupiter.true_pos[2]]) == null,
+		"…and are not landable")
 	# The direction points at the body, not away.
 	var g_vec: Vector3 = _system.gravity_at([
 		_earth.true_pos[0] + _earth.def.radius, _earth.true_pos[1], _earth.true_pos[2]])

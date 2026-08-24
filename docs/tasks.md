@@ -669,7 +669,7 @@ landing gates already prove out manually — the docking computer's philosophy
   live controllable ship; refuses outside a shell; works on a MinorBody once
   LD7 lands.
 
-## Track HZ — Gravity-well hazard: warning, failure, restart (QUEUED 2026-08-24, owner-requested)
+## Track HZ — Gravity-well hazard: warning, failure, restart (BUILT 2026-08-24)
 
 The first real fail state in Cascade. Two beats: a WARNING while the well is
 still winnable, and a FAILURE with a clean restart when it is not — "burned
@@ -707,11 +707,21 @@ in atmosphere or similar."
   through the same path. Dying is now possible — dying UNFAIRLY is not:
   every failure was preceded by the warning beat and the physics were
   winnable at CAUTION.
-- Gates: warning bands fire at computed thresholds (fly the probe in);
-  no-return altitude matches the arithmetic for Jupiter; failure fires at
-  the atmosphere interface and restores the checkpoint (position, velocity,
-  fuel, docked-state fidelity); a full Jupiter dive → restart → fly again
-  loop; checkpoint never captures a falling or warping ship.
+- [x] BUILT as specced: gas giants + the Sun pull (`has_solid_surface=false`
+  splits `shell_body_at` from `landable_body_at`; the autopilot refusal
+  upgraded to ANY shell), `HazardMonitor` on the ship computes escape margin
+  and the no-return radius (gated: Jupiter 9,960 m = R·√(6.2/4), exact),
+  bands CAUTION/WARNING/NO RETURN on the calm HUD line with the margin
+  number, kill at the cloud deck (1.05 R), corona (1.5 R), or atmosphere
+  interface above 80 m/s (landing descents cross at 1.5 m/s — gated safe),
+  2.5 s loss presentation (white-out + reason), restore through the
+  autopilot release pattern from a reference-relative checkpoint (taken
+  every 5 s only when stable + outside shells or landed/docked; never
+  falling, never warping). `tests/hazard_test.gd`, 23 checks. Evidence:
+  20_gravity_warning (margin line over Jupiter), 21_hull_lost (white-out),
+  22_restored (back at the checkpoint beside Earth).
+- Note: landing_test's "gas giants have no shell" gate updated — the rule
+  CHANGED (they pull, harder than the main engine; they just never capture).
 
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 

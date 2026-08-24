@@ -359,8 +359,10 @@ func gravity_at(true_pos: Array) -> Vector3:
 
 
 ## The body whose gravity shell contains a true-space position, or null in
-## open space — what the landing computer and the autopilot's engage check ask.
-func landable_body_at(true_pos: Array) -> CelestialBody:
+## open space — regardless of whether it has ground (Track HZ): gas giants
+## and the Sun pull without offering a landing. What the hazard monitor and
+## the autopilot's engage refusal ask.
+func shell_body_at(true_pos: Array) -> CelestialBody:
 	for body in bodies:
 		if body.def.surface_gravity <= 0.0:
 			continue
@@ -370,6 +372,15 @@ func landable_body_at(true_pos: Array) -> CelestialBody:
 		var r: float = sqrt(dx * dx + dy * dy + dz * dz)
 		if r < body.def.radius * GRAVITY_SHELL_TOP:
 			return body
+	return null
+
+
+## As shell_body_at, but only bodies with ground to land on — what the
+## landing computer and the EVA walk ask.
+func landable_body_at(true_pos: Array) -> CelestialBody:
+	var body := shell_body_at(true_pos)
+	if body != null and body.def.has_solid_surface:
+		return body
 	return null
 
 
