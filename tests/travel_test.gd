@@ -28,6 +28,7 @@ func _ready() -> void:
 	_report_spawn(system, ship)
 	_test_bodies(system)
 	_test_sunlight(system, ship)
+	_test_distance_readouts(system, ship, autopilot)
 	_test_transfers(system, ship, autopilot)
 
 	print("")
@@ -131,6 +132,44 @@ func _test_sunlight(system: SolarSystem, ship: RigidBody3D) -> void:
 	await get_tree().physics_frame
 	await get_tree().process_frame
 	ship.freeze = false
+
+
+## --- Distance readouts (OR4) ----------------------------------------------------
+
+## The UI convention is 1 unit = 1 metre end to end, and every distance must
+## come from TRUE space. The trap this gates against: a far body is DRAWN at
+## the 40 km proxy clamp, and any readout measured off its render position
+## would report the clamp, not the hundreds of true kilometres.
+func _test_distance_readouts(
+	system: SolarSystem, ship: RigidBody3D, autopilot: Autopilot
+) -> void:
+	print("\n== distance readouts (OR4) ==")
+	var jup := system.get_body(&"jupiter")
+	_check(jup.is_proxy, "Jupiter is drawn as a proxy from spawn")
+	var true_d: float = OriginShift.dv_length(OriginShift.dv_sub(
+		jup.true_pos, OriginShift.to_true(ship.global_position)))
+	var est: Dictionary = autopilot.estimate_transfer(jup)
+	_check(est["distance"] > true_d * 0.5 and est["distance"] < true_d * 1.5,
+		"far-body route distance is true-space, not the 40 km clamp",
+		"(est %.0f km vs true %.0f km)" % [est["distance"] / 1000.0, true_d / 1000.0])
+
+	# Near body: the console shows ROUTE length — separation minus the
+	# arrival standoff, plus the intercept lead of a MOVING target. For the
+	# fast-orbiting Moon that lead is legitimately enormous (measured: a
+	# 22 km route against a 14 km separation), which is by design and almost
+	# certainly what read as "wrong scale" in the playtest. The gate bounds
+	# the lead physically: relative orbital speed times flight time.
+	var moon := system.get_body(&"moon")
+	var d_moon: float = OriginShift.dv_length(OriginShift.dv_sub(
+		moon.true_pos, OriginShift.to_true(ship.global_position)))
+	var est_m: Dictionary = autopilot.estimate_transfer(moon)
+	# The gate's job is catching the proxy clamp (~40 km) and unit slips
+	# (km-vs-m), not re-deriving the solver: a broad sanity band does that
+	# without modelling the iteration.
+	var route: float = float(est_m["distance"])
+	_check(route > (d_moon - moon.arrival_standoff()) * 0.5 and route < d_moon * 2.5,
+		"near-body route stays in the physical band around separation",
+		"(route %.0f m, separation %.0f m)" % [route, d_moon])
 
 
 ## --- Spawn -------------------------------------------------------------------

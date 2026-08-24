@@ -404,6 +404,39 @@ explicitly if the site system should ever roll out elsewhere.
 - [x] One field, one definition: the noise/threshold math moved into `assets/shaders/cloud_field.gdshaderinc`, included by BOTH the deck and the surface shader, and both materials are parameterized from `configure_clouds` alone — the shadow can never disagree with its cloud.
 - [x] Gate: surface material carries the shadow uniforms on Earth (matching the def), and `cloud_shadows` stays unset on airless bodies.
 
+### OR5 — PLAN: landing (queued 2026-08-23, owner-requested)
+
+A design task, not an implementation task: produce the plan (architecture.md
+addition + an implementation-ready track here) for making things LANDABLE, in
+two tiers. Bring the plan to the owner before building anything.
+
+**Tier 1 — small/medium debris and asteroids.** At these masses real gravity
+is negligible, so "landing" is CONTACT + ANCHOR, not orbits: kill relative
+velocity, touch, latch (Planetes-style boot clamps / grapple anchor), and
+become one body with the target. Design questions the plan must answer:
+- Anchoring model: joint? reparent? kinematic follow? (Beware the nested
+  RigidBody3D trap — the standing rule — and the frozen-kinematic write-back
+  problem for anything riding a rail-driven parent.)
+- Asteroids do not exist yet: they need a body class (procedural mesh +
+  trimesh collision, tumbling — the first RIGID bodies on rails-free physics
+  at prop scale), probably seeded near stations/fields for M3 contracts.
+- EVA on a tumbling rock: the suit anchoring + surface-relative controls.
+
+**Tier 2 — landable planets.** The blockers noted at PR2 stand: there is NO
+gravity anywhere (`default_gravity = 0`, bodies exert none) and no landed
+reference frame. The plan must cover:
+- A local gravity model near bodies (radial force inside an influence shell,
+  or curved-space cheat) that does NOT break the Newtonian flight rules, the
+  autopilot's brachistochrone assumptions, or flight assist.
+- The landed frame: a landed ship must ride the SPINNING surface (the same
+  co-rotation the detail-site anchors get for free under PlanetSurface) and
+  the floating origin must tolerate a ship glued to a rail-driven surface.
+- Touchdown physics against trimesh skim patches (CCD already exists),
+  landing legs vs the 2%-of-radius relief, takeoff, and the atmosphere
+  descent presentation (aerial perspective + reddened light already exist).
+- Scale honesty: at 2,000 m radius Earth, "landing" happens on a 6 m/texel
+  albedo — decide what the ground game actually is before promising one.
+
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 
 Audit findings, then the plan. What is already RIGHT and must not regress:
@@ -473,7 +506,7 @@ atmosphere's in-scatter reddening is gate-validated physics.
 - [x] Cook an ocean mask into `earth_albedo.png`'s alpha channel (land 0 / sea 1, from the same ETOPO majority rule); surface shader: sea texels get roughness ~0.15, METALLIC 0, SPECULAR 0.6 — Godot's lighting produces the tracking glint disc; polar ice gets a milder version.
 - [x] Gate: harness shot of the glint; planet_test asserts the alpha channel land fraction matches the height map's within 2%.
 
-### SL8 (optional, owner call) — Exposure adaptation
+### SL8 — Exposure adaptation — CLOSED (owner, 2026-08-23: "the stars are fine"). Do not build.
 - [ ] Mild auto-exposure so stars wash out while the sunlit disc fills the frame and bloom back in shadow — real orbital-camera behaviour; clamp the range hard so the HUD and hull never crush. Skip if it fights readability in playtest.
 
 Ordering rationale: SL1 is the largest correctness win per line and everything
@@ -580,21 +613,33 @@ the pre-PR6 build; the list below was reconciled against PR6 / the lighting audi
 / Track SL afterwards, and says so per item. OR2/OR3/OR4 are investigations: find
 the cause and report before committing to a fix.
 
-### OR1 — Disable EVA for now
-Not touched by anything upstream. Stands as raised.
+### OR1 — ~~Disable EVA~~ RESCINDED (owner, 2026-08-23): EVA stays.
+Replaced by a suit audit, findings below (investigated 2026-08-23):
 
-- [ ] Turn EVA off as a player-reachable mode. The owner wants it out of the way
-  while ship flight and the planet renderer are the focus — this is a temporary
-  gate, not a deletion. Keep `eva_controller.gd`, the suit, the fuel resource and
-  `tests/eva_test.tscn` intact and passing.
-- [ ] Preferred shape: one flag (e.g. `GameState.eva_enabled = false`) checked by
-  `EVAController.request_exit()` (`scripts/eva_controller.gd:169`) and by the HUD
-  interact prompt (`scripts/hud.gd:195`, the `F — EVA` line), so the prompt
-  disappears rather than offering an action that silently does nothing. Do not
-  rip out the `InputMode.EVA` gating — every controller is gated on it.
-- [ ] `tests/eva_test.tscn` drives EVA directly and must keep passing: have it set
-  the flag on, or exercise the controller below the gate. A suite that starts
-  failing because the feature is switched off is a broken gate, not a pass.
+**The suit is NOT mis-scaled.** Runtime-measured: world AABB 2.88 m arm-span x
+1.73 m standing height, every node scale 1.0, capsule 1.8 m x 0.35 r, 150 kg.
+The Synty SK_ root-scale trap was correctly handled by the patcher.
+
+**Why it READS giant — the ship is small, not the suit big.** The hull is
+4.59 x 3.01 x 7.24 m — a 12-tonne vessel in a van-sized shell. A 1.73 m
+figure stands over half the hull's height; beside the hatch that reads as a
+giant. (Cameras are equivalent: EVA rig (0, 1.2, 4) frames the suit at about
+the same screen fraction as the ship rig (0, 3, 12) frames the hull — the
+mismatch is world scale, not framing.)
+
+**Control audit: complete 6DOF Newtonian MMU.** WASD/Space/C translation at
+300 N (2 m/s^2 — dramatized but proportionate), mouse pitch/yaw torque
+(40 N-m clamp), Q/E roll, linear+angular flight assist on by default holding
+station against the local body's frame, F boards from the cargo bay. Fuel
+drains on thrust AND torque and cuts both at empty (spec-intended dead-stick).
+Weak spots if EVA gets a feel pass later: keys are binary full-thrust, no
+free-look, empty-tank tumble is unforgiving.
+
+- [ ] **Owner call**: fix the scale mismatch at the ship, not the suit —
+  scale the hull assembly ~1.75-2x (13-14.5 m long, human ~1/8 of length like
+  a real tug; mass/thrust already fit a ship that size), rescaling collision,
+  cargo bay, exit point and docking collar together. Cheaper cosmetic
+  alternative: pull the EVA camera back to (0, 1.6, 6). Or both.
 
 ### OR2 — Dramatic lighting change tied to MOVEMENT — FIXED 2026-08-23
 **Still reproduces.** The owner playtested the current build and re-reported
@@ -691,10 +736,25 @@ investigation.
   directory and the tiles already put 55 MB in the repo. A further tier needs a
   deliberate call about whether it belongs in git.
 
-### OR4 — Audit displayed distances against true scale
-Not touched upstream. Track SL1's "distance-true sunlight" is about light falloff
-with distance, not UI readouts, and the `travel_test` additions are sunlight and
-eclipse geometry. Stands as raised.
+### OR4 — Audit displayed distances against true scale — VERIFIED CLEAN 2026-08-23
+**Audited end to end, 2026-08-23 — the readouts are unit-true and true-space:**
+`Autopilot.estimate_transfer` computes its route in 64-bit TRUE space
+(`OriginShift.to_true` -> `position_at` -> `dv_length`), so the feared
+proxy-clamp leak does not exist; `_format_distance` is a plain m/km
+formatter; the docking readout measures render space but only inside a
+capture volume, where render IS true; HUD velocity is already
+reference-frame-relative (the 131 m/s only appears in open space, where
+absolute is the honest answer). New gate in `travel_test`: Jupiter, drawn at
+the 40 km proxy, must still report its ~800 km true route; the Moon's route
+must equal separation minus standoff plus intercept lead.
+
+**The one real confusion source (by design, owner may want a UI tweak):** the
+nav console shows PLANNED ROUTE length — distance to the intercept point at
+arrival time, minus the arrival standoff — not current separation. For a
+moving target these legitimately differ by double-digit percent — measured: a 22 km route to the Moon against a 14 km separation, because the Moon orbits at ~52 m/s and the intercept leads it by ~2 minutes of flight. If that is
+what read as "wrong scale," the fix is labelling (e.g. "route"), not math.
+Minor note: the prograde marker uses absolute velocity while VEL shows
+frame-relative — spec-conformant, but worth a look in a HUD pass.
 
 - [ ] Owner suspects the UI is reporting distances in a different scale than it
   should. Verify end to end rather than adjusting a formatter until numbers look
