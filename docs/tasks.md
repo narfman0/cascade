@@ -596,17 +596,45 @@ Not touched by anything upstream. Stands as raised.
   the flag on, or exercise the controller below the gate. A suite that starts
   failing because the feature is switched off is a broken gate, not a pass.
 
-### OR2 — Earth brightens sharply about a second into play
-**May already be fixed — confirm by eye before investigating.** The lighting
-audit and Track SL1 (distance-true sunlight) both landed after the session that
-raised this. A luminance probe over the first 5 s of `game_world.tscn` on the
-current tree shows no step at all: mean frame luminance moves 0.132 → 0.153 →
-0.079 smoothly, largest single-frame change +0.4%, which is the ship's own orbital
-motion carrying the sunlit disc through frame rather than a lighting pop.
+### OR2 — Dramatic lighting change tied to MOVEMENT (next up, owner-confirmed 2026-08-23)
+**Still reproduces.** The owner playtested the current build and re-reported
+with sharper symptoms: it is not (only) a startup pop — *moving a certain
+amount* triggers a dramatic lighting change, "like shadows turn off or don't
+apply, or fight with bloom". That phrasing points at a DISCRETE THRESHOLD the
+ship crosses, not a converging system. The startup-luminance probe (below)
+stays useful context but no longer bounds the bug.
 
-- [ ] Owner: watch the first few seconds again and say whether it still happens.
-  If it does not, close this. A whole-frame mean can miss a jump confined to
-  Earth's disc, so eyes beat the probe here.
+Threshold suspects, in order of how well they match "moved a certain amount":
+1. **`directional_shadow_max_distance = 500`** (`solar_system.gd`): anything
+   crossing 500 m from the camera snaps between shadowed and unshadowed — on
+   approach to terrain, a station, or debris, whole surfaces pop. "Shadows
+   turn off" is this suspect's exact signature. Try raising it (with the
+   4096 map, 12 cm/texel headroom exists) or switching to PSSM splits, and
+   check the bias pair still holds.
+2. **OriginShift rebase** (>10 km of travel): everything render-space jumps
+   in one frame; if any lighting-adjacent state reads a stale position for
+   one frame (ambient's `best.position`, the glare billboard, shadow cascade
+   fitting), the frame flashes. Correlate: does the change land exactly on a
+   rebase? Log `OriginShift.shift_to` alongside a frame-luminance probe.
+3. **Skim collider swap at 500/600 m altitude** — should be physics-only,
+   but the patch colliders pin refinement, which changes geometry density.
+4. **L2 tile residency margins (14°/28°)** and the depth-3+ cache purge:
+   terrain rebuilds under the camera as tiles stream — a visible relief
+   change reads as a lighting change at grazing sun.
+5. **Proxy flip at `MAX_RENDER_DISTANCE` 40 km** — limb/shell/glare all
+   rescale in one frame when a body crosses the clamp.
+6. **Glow response, not a light at all**: `glow_intensity 0.4 / strength
+   0.9` reacts frame-to-frame to bright emitters entering the frame (sun
+   glare, city lights, the blooming disc) — "fights with bloom" suggests the
+   owner is seeing the bloom term itself swing as framing changes.
+
+Method: reproduce while logging every candidate's toggle (one print per
+threshold crossing) against a mean-frame-luminance probe; the jump will
+timestamp itself against exactly one of them. Fix the mechanism, not the
+constant, then re-run all six suites and recapture the SL screenshots.
+
+- [ ] Instrument the six thresholds + luminance probe, reproduce, attribute.
+- [ ] Fix the attributed mechanism; keep the others' logging as a debug flag.
 - [ ] If it does still happen, note what is now ruled out: **auto-exposure is not
   implemented** — SL8 (exposure adaptation) is unbuilt and pending an owner call,
   and the only exposure control in the project is the static
