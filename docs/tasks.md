@@ -605,6 +605,114 @@ along appropriate axes." Built as scoped, all in-engine:
 - [ ] EVA suit thruster puffs: stretch, same pattern at MMU scale — folds
   into Track AN's suit pass.
 
+## Track LD7 — Minor-body landing: asteroids sized for the ship (QUEUED 2026-08-24, owner-requested)
+
+"Details when landing on sufficiently small asteroids where the ship is
+designed within that amount of gravity." The sweet spot the owner is naming:
+bodies whose gravity sits INSIDE the ship's RCS envelope — where landing is a
+gentle everyday act flown on lateral thrusters, not the belly-jet event a
+planet demands. Design decisions to build against:
+
+- **A new middle class: MinorBody.** Between SpaceRock (free physics, latch,
+  no gravity) and CelestialBody (planet-scale, shells, belly jets): asteroids
+  ~100–600 m radius, on analytic rails like moons (closed-form position, warp
+  safe), procedural displaced-sphere mesh + trimesh collision at TRUE scale
+  (no proxy needed at these sizes), tiny gravity shell g0 ≈ 0.05–0.5 m/s² —
+  all inside the 1.25 m/s² RCS envelope, so the ship hovers on RCS alone and
+  the belly-jet promotion never triggers. The class boundary IS the design:
+  if you latch it, it's a rock; if you land on it, it's a minor body.
+- **Landing reuses LD4 wholesale.** Same capture conditions, same freeze +
+  leave-space + parent-under-the-body pattern, same takeoff handoff — the
+  LandingComputer just needs MinorBody in its landable query. Tumbling
+  asteroids make the co-rotation machinery earn its keep: land on a slowly
+  tumbling one and the sky wheels overhead.
+- **The details the owner asked for** (the reason this track exists):
+  touchdown puffs of regolith dust (Track FX's emitter kit pointed down),
+  the SURFACE HUD panel adapting its scale (ALT in tens of metres, VSPD
+  threshold soft on a 0.1 g rock), EVA walking on a minor body (LD6's walk
+  with g from the minor body's shell — jump 30 m and float down), boot-clamp
+  irrelevant here because gravity holds you, and the nav console listing
+  minor bodies as destinations with honest standoffs.
+- Seed 2–3 of them: one near the spawn debris field (the tutorial asteroid),
+  one in a distinct orbit worth a transfer, one tumbling.
+- Gates: land/takeoff on a minor body via the full descent path; hover on
+  RCS alone (belly jets never promoted); EVA jump ballistics under micro-g;
+  co-rotation on the tumbling one; all existing suites green.
+
+## Track AL — Autoland (QUEUED 2026-08-24, owner-requested)
+
+One key from inside a gravity shell: the computer flies the descent the
+landing gates already prove out manually — the docking computer's philosophy
+(manual first, assisted second) now earning its second act.
+
+- **Scope: from shell to ground.** Engage only inside a gravity shell (the
+  autopilot's refusal boundary is autoland's jurisdiction line — the two
+  hand off at 1.5 R). From orbit, the existing autopilot takes you to the
+  standoff; autoland takes you down.
+- **Fly it live, not analytically.** Unlike the autopilot's frozen-hull
+  cruise, autoland drives the REAL physics ship through the real controller
+  signal path (fx signals light the belly jets for free): pitch upright
+  against local up, kill lateral drift against the surface point under you,
+  descend on a braked profile (v_target ≈ sqrt(2·a_avail·alt)·0.7, capped),
+  flare to 1.5 m/s under the 2 m/s capture limit, let the LD4 capture fire.
+  No new landing state — autoland is an input source, same as a pilot.
+- **Site choice is the pilot's.** Autoland lands where you are pointing DOWN
+  from — it nulls lateral drift and descends radially; it does not pick
+  sites. (A "land at site X" upgrade belongs to the nav console later.)
+- **Abort honestly.** Any stick input cancels (the autopilot's discoverable
+  rule); fuel-out mid-descent just cuts thrust — the hazard track below owns
+  what happens next.
+- HUD: AUTOLAND armed/active line in the SURFACE panel; the M2 AudioManager
+  hook comments at engage/touchdown.
+- Gates: engage at 1.4 R over Earth and the Moon → landed state captured
+  with touchdown speed under limit and upright; abort mid-descent returns a
+  live controllable ship; refuses outside a shell; works on a MinorBody once
+  LD7 lands.
+
+## Track HZ — Gravity-well hazard: warning, failure, restart (QUEUED 2026-08-24, owner-requested)
+
+The first real fail state in Cascade. Two beats: a WARNING while the well is
+still winnable, and a FAILURE with a clean restart when it is not — "burned
+in atmosphere or similar."
+
+- **Make gas giants pull.** Today only landable bodies have shells, so
+  nothing can truly suck you in. Gas giants (and Neptune/Uranus/Saturn/
+  Jupiter + Venus's deep atmosphere + the Sun as a special case) get gravity
+  shells WITH NO SURFACE CAPTURE: Jupiter at ×0.25 real is 6.2 m/s² — more
+  than the main engine's 4.0, so inside a Jovian shell there is an altitude
+  below which escape is arithmetically impossible. That line is the game's
+  first cliff, and it must be computed, not authored: r_no_return where
+  g(r) = a_ship_max, with fuel state folded in.
+- **Warning beat (HUD + audio hooks).** Inside any shell, compute escape
+  margin = a_ship_max − g(r) and time-to-floor at current v_rad. Bands:
+  CAUTION (amber, margin thinning), WARNING (the calm HUD's one permitted
+  urgent tone: "GRAVITY WELL — ESCAPE MARGIN 0.8 m/s²"), POINT OF NO RETURN
+  crossed → the failure beat is now guaranteed physics. The Planetes tone
+  survives by the warning being INFORMATIVE, never a klaxon screen-flash.
+- **Failure beat.** Below the kill boundary — atmosphere entry interface for
+  bodies with atmospheres (1 + height_fraction shell at excessive speed, hull
+  heating presentation: reuse the reddened-light + camera shake kit), cloud
+  deck for gas giants, corona distance for the Sun — the ship is lost:
+  short whiteout/burn presentation, then RESTART FROM THE LAST SAFE STATE.
+- **Safe state = periodic checkpoint, not a save system.** Every N seconds
+  while the ship is (a) outside every shell or landed/docked, (b) autopilot
+  idle, (c) under 5 m/s relative to its reference frame, snapshot true
+  position + velocity + fuel + sim_time offset into GameState. Failure
+  restores the snapshot through the OriginShift.shift_to + velocity-handoff
+  pattern (the autopilot release path, reused). Docked/landed snapshots
+  restore docked/landed.
+- **The escape-proof cases stay honest:** Earth reentry at orbital speed
+  burns you even though Earth is landable (interface speed check, not just
+  depth); a dead-stick ship falling into ANY shell with empty tanks fails
+  through the same path. Dying is now possible — dying UNFAIRLY is not:
+  every failure was preceded by the warning beat and the physics were
+  winnable at CAUTION.
+- Gates: warning bands fire at computed thresholds (fly the probe in);
+  no-return altitude matches the arithmetic for Jupiter; failure fires at
+  the atmosphere interface and restores the checkpoint (position, velocity,
+  fuel, docked-state fidelity); a full Jupiter dive → restart → fly again
+  loop; checkpoint never captures a falling or warping ship.
+
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 
 Audit findings, then the plan. What is already RIGHT and must not regress:
