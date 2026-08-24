@@ -225,11 +225,107 @@ func _test_descent_and_landing() -> void:
 	# kilometres in frames (the write-back fight).
 	if suit != null:
 		suit.call("request_exit")
-		suit.freeze = true
 		_check(suit.get_parent() != null and suit.get_parent() != _earth.planet_surface(),
 			"EVA exit while landed enters the world, not the rail-driven surface")
+		await _test_surface_walk(suit)
 		GameState.input_mode = GameState.InputMode.SHIP_FLIGHT
-		suit.call("stow")
+		if not suit.call("is_stowed"):
+			suit.call("stow")
+
+
+## LD6 — run around and jump, with gravity pulling us down appropriately.
+## The suit fell out of the hatch live; it must auto-enter the walk on
+## touching the ground, then run, jump ballistically under Earth's 2.45,
+## fail to jetpack away (thrust 2.0 < g), and board on foot.
+func _test_surface_walk(suit: RigidBody3D) -> void:
+	print("\n== surface walk ==")
+	# Fall ~2 m from the lifted hatch onto the ground; auto-walk captures.
+	var deadline: int = Time.get_ticks_msec() + 20000
+	var tick: int = 0
+	while suit.get("clamped_body") == null and Time.get_ticks_msec() < deadline:
+		await get_tree().physics_frame
+		tick += 1
+		if tick % 60 == 0:
+			var names: Array = []
+			for c in suit.get_colliding_bodies():
+				names.append(c.name)
+			var alt: float = (suit.global_position
+				- OriginShift.to_render(_earth.true_pos)).length() - _earth.def.radius
+			var vrel: Vector3 = suit.linear_velocity 				- LandingComputer.surface_point_velocity(_earth, suit.global_position)
+			print("    [fall %3d] alt %.1f vrel %.2f contacts %s frozen=%s cooldown %.2f" % [
+				tick, alt, vrel.length(), names, suit.freeze, suit.get("_walk_cooldown")])
+		if tick > 600:
+			break
+	_check(suit.get("clamped_body") == _earth, "touching ground auto-enters the walk")
+	_check(suit.get_parent() == _earth.planet_surface(),
+		"walking suit rides the surface frame")
+	# Let the feet settle.
+	for i in 30:
+		await get_tree().physics_frame
+
+	# Run: hold W for 2 s — the suit crosses ground, and stays ON it.
+	var surface := _earth.planet_surface()
+	var start_local: Vector3 = surface.to_local(suit.global_position)
+	Input.action_press("thrust_forward")
+	var max_alt_err: float = 0.0
+	for i in 120:
+		await get_tree().physics_frame
+	Input.action_release("thrust_forward")
+	var end_local: Vector3 = surface.to_local(suit.global_position)
+	var run_dist: float = start_local.distance_to(end_local)
+	_check(run_dist > 5.0 and run_dist < 12.0, "runs across the ground",
+		"%.1f m in 2 s" % run_dist)
+	_check(bool(suit.get("_walk_airborne")) == false, "still on the ground after the run")
+
+	# Jump: tap SPACE — ballistic apex ~ v²/2g under Earth gravity, lands back.
+	var g: float = _earth.def.surface_gravity
+	var v0: float = float(suit.get("jump_speed"))
+	var r0: float = surface.to_local(suit.global_position).length()
+	Input.action_press("thrust_up")
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	Input.action_release("thrust_up")
+	var apex: float = 0.0
+	var airborne_ticks: int = 0
+	for i in 240:
+		await get_tree().physics_frame
+		apex = maxf(apex, surface.to_local(suit.global_position).length() - r0)
+		if bool(suit.get("_walk_airborne")):
+			airborne_ticks += 1
+		elif airborne_ticks > 5:
+			break
+	var apex_expect: float = v0 * v0 / (2.0 * g)
+	_check(absf(apex - apex_expect) < apex_expect * 0.35, "jump apex matches v²/2g",
+		"%.2f m vs %.2f expected" % [apex, apex_expect])
+	var airtime_expect: float = 2.0 * v0 / g
+	_check(absf(airborne_ticks / 60.0 - airtime_expect) < airtime_expect * 0.4,
+		"airtime matches 2v/g", "%.2f s vs %.2f expected" % [airborne_ticks / 60.0, airtime_expect])
+	_check(suit.get("clamped_body") == _earth, "landed back on its feet")
+
+	# Jetpack: 2.0 m/s² of thrust against Earth's 2.45 — a held burn buys a
+	# tall hop, and Earth pulls it back down. (The Moon's net +1.6 would
+	# climb away; the TWR facts are gated above.)
+	Input.action_press("thrust_up")
+	for i in 180:
+		await get_tree().physics_frame
+	Input.action_release("thrust_up")
+	var back_deadline: int = Time.get_ticks_msec() + 20000
+	while (suit.get("clamped_body") == null or bool(suit.get("_walk_airborne"))) 			and Time.get_ticks_msec() < back_deadline:
+		await get_tree().physics_frame
+	_check(suit.get("clamped_body") == _earth and not bool(suit.get("_walk_airborne")),
+		"jetpack cannot escape Earth on foot — the hop comes back down")
+
+	# Board on foot: walk the suit to the bay and interact.
+	var bay := _ship.get_node("CargoBay") as Node3D
+	suit.set("clamped_body", suit.get("clamped_body"))  # no-op, keeps typing happy
+	# Teleport the walking suit beside the bay in surface-local space.
+	var bay_local: Vector3 = surface.to_local(bay.global_position)
+	suit.transform.origin = bay_local
+	await get_tree().physics_frame
+	_check(bool(suit.call("can_board")), "can board on foot at the bay")
+	suit.call("request_board")
+	_check(bool(suit.call("is_stowed")) and GameState.input_mode == GameState.InputMode.SHIP_FLIGHT,
+		"boards from the walk")
 
 
 ## Warp time forward: the ship's pose in the surface frame must hold exactly

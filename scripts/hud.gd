@@ -228,7 +228,7 @@ func _update_latch_readout() -> void:
 			_latch_label.text = "CLAMPED — G or a hard shove releases"
 			_latch_label.visible = true
 		elif _character.get("clamped_body") != null:
-			_latch_label.text = "GROUNDED — hold SPACE to release"
+			_latch_label.text = "ON FOOT — WASD run · SPACE jump · hold SPACE to thrust"
 			_latch_label.visible = true
 		else:
 			_latch_label.visible = false

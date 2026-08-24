@@ -107,6 +107,34 @@ func _moon_shot() -> void:
 	_level_landed_hull(moon)
 	await _warp_to_morning(moon)
 	await _suit_groundside_shot(moon, "15_landed_moon")
+	# 6. And jump (LD6): a lunar leap is metres high and seconds long — catch
+	# it on the way up, ship and ground falling away below.
+	var suit: RigidBody3D = _ship.get("character")
+	suit.call("request_exit")
+	suit.freeze = true
+	for i in 8:
+		var up2: Vector3 = (_ship.global_position
+			- OriginShift.to_render(moon.true_pos)).normalized()
+		suit.global_position = _ship.global_position \
+			+ (OriginShift.to_render(_system.get_body(&"sun").true_pos)
+			- _ship.global_position).normalized().slide(up2).normalized() * 10.0 + up2 * 0.5
+		suit.global_basis = Basis.looking_at(
+			(_ship.global_position + up2 * 1.5 - suit.global_position).normalized(), up2)
+		PhysicsServer3D.body_set_state(
+			suit.get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, suit.global_transform)
+		await get_tree().physics_frame
+	suit.call("enter_walk_on", moon)
+	await _settle(30)
+	Input.action_press("thrust_up")
+	for i in 8:
+		await get_tree().physics_frame
+	Input.action_release("thrust_up")
+	# Ride up for ~1.5 s of the leap, then take the frame.
+	for i in 90:
+		await get_tree().physics_frame
+	await _shot("16_moon_jump")
+	GameState.input_mode = GameState.InputMode.SHIP_FLIGHT
+	suit.call("stow")
 
 
 ## A landed hull captures nose-to-sky, which hangs the trailing third-person
@@ -200,15 +228,13 @@ func _suit_groundside_shot(body: CelestialBody, label: String) -> void:
 		PhysicsServer3D.body_set_state(
 			suit.get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, suit.global_transform)
 		await get_tree().physics_frame
-	# Boot-clamp: frozen out of the space, parented under the surface — rides
-	# the ground exactly like the hull does.
-	LandingComputer.clamp_to_surface(suit, body)
-	suit.set("clamped_body", body)
+	# Enter the walk (LD6): parented under the surface, feet settle onto the
+	# terrain, and the staged facing seeds the walk's forward.
+	suit.call("enter_walk_on", body)
 	print("  staged: sep %.1f m (want ~15)" % (suit.global_position - _ship.global_position).length())
 	await _settle(50)
 	await _shot(label)
 	GameState.input_mode = GameState.InputMode.SHIP_FLIGHT
-	suit.set("clamped_body", null)
 	suit.call("stow")
 
 

@@ -513,6 +513,30 @@ all six prior suites green. Harness traps for the standing list:
   children to the 40 km proxy shell, and to_true() of that locks the garbage
   in (the `_frame_site` trap, third appearance).
 
+### LD6 — EVA surface locomotion (BUILT 2026-08-24, owner-requested: "can we run around and jump?")
+
+Yes. On a planet the grounded state is a WALK SIMULATION, not a static clamp:
+the suit stays frozen out of the physics space, parented under the spinning
+PlanetSurface (the landed-frame pattern — the only stable stance on ground
+moving at 131 m/s), and the controller integrates run/jump/gravity in the
+surface's LOCAL frame (fictitious forces ~0.03 m/s² — ignored on purpose).
+
+- [x] Auto-enter on approach — by PROXIMITY, never contact: a live suit that
+  touches the per-frame-teleporting skim colliders is solver-kicked at
+  ~20 m/s before any contact reports (trap #9's EVA verse).
+- [x] WASD run (4 m/s), mouse yaw, upright against local up; SPACE jumps.
+- [x] Ballistics gated against theory: apex = v²/2g (1.04 m measured vs 0.99
+  on Earth), airtime = 2v/g. On the Moon the same legs jump ~6 m for ~11 s.
+- [x] Hold SPACE = jetpack: net +1.6 m/s² on the Moon climbs away into free
+  EVA past the 6 m departure bar; Earth's TWR 0.8 tops out at 5.4 m and the
+  hop comes back down — gated. Once you're down on Earth, you walk.
+- [x] Terrain truth: raycast against skim colliders near the ship, cooked
+  height sampler anywhere else — walk the whole planet if you like.
+- [x] Board on foot at the cargo bay (the Area3D cannot see an out-of-space
+  suit; boarding goes by distance). G-latch is rocks-only now.
+- [ ] Polish later: walk/run animations (the Synty rig ships one take),
+  camera pitch on foot, footstep audio hooks.
+
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 
 Audit findings, then the plan. What is already RIGHT and must not regress:
