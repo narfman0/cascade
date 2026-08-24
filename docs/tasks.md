@@ -573,6 +573,102 @@ Fixed on the way through, worth knowing:
 ### SD3 (stretch — do not start without owner)
 - [ ] Assisted approach via ManeuverMinigame; ship-to-ship ports (host stays live, guest freezes — the stowed-suit pattern).
 
+## Owner requests — queued 2026-08-23
+
+Raised by the owner during a play session, in no fixed order. The session ran on
+the pre-PR6 build; the list below was reconciled against PR6 / the lighting audit
+/ Track SL afterwards, and says so per item. OR2/OR3/OR4 are investigations: find
+the cause and report before committing to a fix.
+
+### OR1 — Disable EVA for now
+Not touched by anything upstream. Stands as raised.
+
+- [ ] Turn EVA off as a player-reachable mode. The owner wants it out of the way
+  while ship flight and the planet renderer are the focus — this is a temporary
+  gate, not a deletion. Keep `eva_controller.gd`, the suit, the fuel resource and
+  `tests/eva_test.tscn` intact and passing.
+- [ ] Preferred shape: one flag (e.g. `GameState.eva_enabled = false`) checked by
+  `EVAController.request_exit()` (`scripts/eva_controller.gd:169`) and by the HUD
+  interact prompt (`scripts/hud.gd:195`, the `F — EVA` line), so the prompt
+  disappears rather than offering an action that silently does nothing. Do not
+  rip out the `InputMode.EVA` gating — every controller is gated on it.
+- [ ] `tests/eva_test.tscn` drives EVA directly and must keep passing: have it set
+  the flag on, or exercise the controller below the gate. A suite that starts
+  failing because the feature is switched off is a broken gate, not a pass.
+
+### OR2 — Earth brightens sharply about a second into play
+**May already be fixed — confirm by eye before investigating.** The lighting
+audit and Track SL1 (distance-true sunlight) both landed after the session that
+raised this. A luminance probe over the first 5 s of `game_world.tscn` on the
+current tree shows no step at all: mean frame luminance moves 0.132 → 0.153 →
+0.079 smoothly, largest single-frame change +0.4%, which is the ship's own orbital
+motion carrying the sunlit disc through frame rather than a lighting pop.
+
+- [ ] Owner: watch the first few seconds again and say whether it still happens.
+  If it does not, close this. A whole-frame mean can miss a jump confined to
+  Earth's disc, so eyes beat the probe here.
+- [ ] If it does still happen, note what is now ruled out: **auto-exposure is not
+  implemented** — SL8 (exposure adaptation) is unbuilt and pending an owner call,
+  and the only exposure control in the project is the static
+  `tonemap_exposure = 1.0` in `scenes/game_world.tscn:30`. So a converging
+  auto-exposure cannot be the cause.
+- [ ] Remaining suspects, in order: the PR6 L2 tile streaming swapping in a
+  different-looking surface as it becomes resident (`scripts/world/body_surface.gd`,
+  `planet_surface.gd`), the PR4 atmosphere LUTs finishing their precompute and
+  swapping in (`scripts/world/body_atmosphere.gd`, `atmosphere_math.gd`), or the
+  cloud layer resolving. Time the jump against each system's ready signal before
+  changing any values — the fix for a late texture swap (blend it in) is nothing
+  like the fix for a bad constant.
+- [ ] Re-run `atmosphere_test` and `planet_test` after any change, and re-capture
+  the lighting screenshots the PR4/PR5/SL entries reference.
+
+### OR3 — Recognisable Earth surface up close
+**Largely superseded by PR6, which the owner had not seen when raising this.**
+PR6 shipped exactly the work this task was going to scope: an ETOPO 2022 height
+tile pyramid (L1 complete at effective 4096, L2 land-only at effective 8192, 36
+tiles / 55 MB committed under `assets/planets/tiles/`), `earth_albedo.png`
+recooked to 4096×2048 from Blue Marble, and distance-based L2 streaming with
+hysteresis. `planet_test` already asserts the Himalaya resolves higher through
+tiles than the 2 k global map. So what remains is a judgement, not an
+investigation.
+
+- [ ] Owner: fly down and say whether PR6 clears the bar — "recognise all the
+  coastlines, mountains, continents". The answer decides whether this closes or
+  turns into a further fidelity tier.
+- [ ] If it does not clear the bar, the honest next question is which of the three
+  is short: height detail (tile pyramid depth), colour detail (albedo ceiling), or
+  the shading that makes relief legible. They have very different costs and only
+  one is likely to be the actual complaint — establish which before cooking
+  anything, and bring the owner a recommendation.
+- [ ] Note the git boundary: `assets/planets/` is the one committed asset
+  directory and the tiles already put 55 MB in the repo. A further tier needs a
+  deliberate call about whether it belongs in git.
+
+### OR4 — Audit displayed distances against true scale
+Not touched upstream. Track SL1's "distance-true sunlight" is about light falloff
+with distance, not UI readouts, and the `travel_test` additions are sunlight and
+eclipse geometry. Stands as raised.
+
+- [ ] Owner suspects the UI is reporting distances in a different scale than it
+  should. Verify end to end rather than adjusting a formatter until numbers look
+  right.
+- [ ] The convention is fixed and stated at the top of this file: **1 Godot unit =
+  1 metre**. Check every readout against it: `_format_distance()`
+  (`scripts/nav_console.gd:176`) and the nav row distances it renders from
+  `Autopilot.estimate_transfer()`, the docking readout (`scripts/hud.gd:171`,
+  `PORT %6.1f m`), and the HUD velocity/reference-frame lines.
+- [ ] The likely trap is true space vs render space, not a unit constant. Far
+  bodies are drawn as **angular-size proxies** — `CelestialBody` clamps distance
+  and scales radius by the same ratio (`scripts/world/celestial_body.gd:181-222`,
+  `is_proxy`). Any distance measured off a proxy's `global_position` is the
+  clamped render distance, not the true one, and will read far too small for
+  anything beyond the clamp. Distances must come from true space
+  (`OriginShift.dv_sub` / `dv_length` on `true_pos`).
+- [ ] Sanity-check the results against known values — Moon ≈ 384,400 km, Sun ≈
+  1 AU ≈ 149.6 M km — and add the check to `tests/travel_test.gd`, which already
+  prints a per-destination distance column and is where a scale regression should
+  get caught.
+
 ## Milestone 3 — Debris capture + contracts (DO NOT START)
 
 Gated on M1 + M2 verification and owner sign-off on movement feel. Not yet broken down. Headline scope from plan.md Phase 2/3: physics-active debris, Grapple Arm `Tool` Resource + RotationMatch minigame, tether joint, CargoBay stow, first contract via `ContractManager`.
