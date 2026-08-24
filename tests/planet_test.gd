@@ -481,29 +481,63 @@ func _test_real_sky() -> void:
 	_check(mean > 0.001 and mean < 0.06, "sky luminance stays in exposure range",
 		"(mean %.4f)" % mean)
 
+	# CHIRALITY: the sky must not be a mirror image (the bug that shipped the
+	# first cook). Find the actual baked peaks for Betelgeuse, Rigel and
+	# Sirius, take the signed volume of the FOUND directions, and compare its
+	# sign against the real equatorial frame's (+0.126) pushed through the
+	# proper rotation — which preserves sign. A mirrored map flips it.
+	var found_b: Vector3 = _sky_window_find(img, 88.79, 7.41)["dir"]
+	var found_r: Vector3 = _sky_window_find(img, 78.63, -8.20)["dir"]
+	var found_s: Vector3 = _sky_window_find(img, 101.29, -16.72)["dir"]
+	var chirality: float = found_b.dot(found_r.cross(found_s))
+	var expected: float = _sky_dir(88.79, 7.41).dot(
+		_sky_dir(78.63, -8.20).cross(_sky_dir(101.29, -16.72)))
+	_check(chirality * expected > 0.0 and absf(expected - 0.1262) < 0.02,
+		"Orion and Sirius wind the right way (no mirror-image sky)",
+		"(found %+.4f, real %+.4f)" % [chirality, expected])
 
-## Peak luminance in a ~1 degree window around an RA/Dec position, through the
-## SAME equatorial->world transform the cook uses (axial tilt 0.41 about X).
-func _sky_window_peak(img: Image, ra_deg: float, dec_deg: float) -> float:
+
+## Game-world direction of an RA/Dec position, through the SAME proper
+## rotation the cook uses (z negated — the mirror-image trap; tilt 0.41).
+func _sky_dir(ra_deg: float, dec_deg: float) -> Vector3:
 	var ra := deg_to_rad(ra_deg)
 	var dec := deg_to_rad(dec_deg)
 	var x := cos(dec) * cos(ra)
 	var y := sin(dec)
-	var z := cos(dec) * sin(ra)
+	var z := -cos(dec) * sin(ra)
 	var tilt := 0.41
-	var dir := Vector3(x, y * cos(tilt) - z * sin(tilt), y * sin(tilt) + z * cos(tilt))
+	return Vector3(x, y * cos(tilt) - z * sin(tilt), y * sin(tilt) + z * cos(tilt))
+
+
+## Peak luminance (and its pixel) in a ~1 degree window around an RA/Dec
+## position. Returns {"peak": float, "dir": Vector3 of the found pixel}.
+func _sky_window_find(img: Image, ra_deg: float, dec_deg: float) -> Dictionary:
+	var dir := _sky_dir(ra_deg, dec_deg)
 	var u := 0.5 + atan2(dir.z, dir.x) / TAU
 	var v := 0.5 - asin(clampf(dir.y, -1.0, 1.0)) / PI
 	var cx := int(u * img.get_width())
 	var cy := int(v * img.get_height())
 	var reach := int(img.get_width() / 360.0) + 2
 	var peak := 0.0
+	var best_px := cx
+	var best_py := cy
 	for dy in range(-reach, reach + 1):
 		for dx in range(-reach, reach + 1):
 			var px := posmod(cx + dx, img.get_width())
 			var py := clampi(cy + dy, 0, img.get_height() - 1)
-			peak = maxf(peak, img.get_pixel(px, py).get_luminance())
-	return peak
+			var lum := img.get_pixel(px, py).get_luminance()
+			if lum > peak:
+				peak = lum
+				best_px = px
+				best_py = py
+	var lon := (float(best_px) + 0.5) / float(img.get_width()) * TAU - PI
+	var lat := PI / 2.0 - (float(best_py) + 0.5) / float(img.get_height()) * PI
+	return {"peak": peak,
+		"dir": Vector3(cos(lat) * cos(lon), sin(lat), cos(lat) * sin(lon))}
+
+
+func _sky_window_peak(img: Image, ra_deg: float, dec_deg: float) -> float:
+	return _sky_window_find(img, ra_deg, dec_deg)["peak"]
 
 
 ## Track SL7: the albedo's alpha channel is the sea mask, cut by the same

@@ -357,13 +357,20 @@ def _bv_to_rgb(bv):
 
 
 def _equatorial_to_world(ra_rad, dec_rad):
-    """RA/Dec (J2000) -> game world direction: +Y is the celestial pole,
-    RA maps onto the game's lon = atan2(z, x) convention, then the whole
-    sphere leans by Earth's axial tilt about X — so the celestial pole sits
-    over Earth's spin axis and the ecliptic lies in the orbital plane."""
+    """RA/Dec (J2000) -> game world direction: +Y is the celestial pole and
+    RA 0 is +X, then the whole sphere leans by Earth's axial tilt about X —
+    so the celestial pole sits over Earth's spin axis and the ecliptic lies
+    in the orbital plane.
+
+    The z term is NEGATED on purpose: the naive (x, sin dec, cos dec sin ra)
+    swaps two axes of the right-handed equatorial frame, which is an improper
+    transform (det -1) — it bakes a MIRROR-IMAGE sky, every constellation
+    backwards and the sphere winding against Earth's spin. The proper
+    rotation real(x,y,z) -> game(x, z, -y) keeps chirality; the gate test
+    measures the baked map's handedness so this cannot regress."""
     x = math.cos(dec_rad) * math.cos(ra_rad)
     y = math.sin(dec_rad)
-    z = math.cos(dec_rad) * math.sin(ra_rad)
+    z = -math.cos(dec_rad) * math.sin(ra_rad)
     ct, st = math.cos(EARTH_AXIAL_TILT), math.sin(EARTH_AXIAL_TILT)
     return x, y * ct - z * st, y * st + z * ct
 
