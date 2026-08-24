@@ -13,6 +13,12 @@ enum Mode { THIRD_PERSON, COCKPIT }
 ## GameState.input_mode matches. Leave at -1 to always stay current.
 @export var owned_input_mode: int = -1
 
+## Pitch of the third-person boom around the target's local X, in radians.
+## Zero keeps the classic behind-and-above framing; the EVA walk drives this
+## from mouse Y so you can look up from the surface (LD6). Positive drops the
+## camera low aiming up; negative lifts it high aiming down.
+var boom_pitch: float = 0.0
+
 @onready var _camera: Camera3D = $Camera3D
 var _target: Node3D
 var _mode: Mode = Mode.THIRD_PERSON
@@ -53,7 +59,10 @@ func _process(delta: float) -> void:
 	if _target == null:
 		return
 
-	var desired: Vector3 = _target.to_global(third_person_offset)
+	var boom: Vector3 = third_person_offset
+	if absf(boom_pitch) > 1e-4:
+		boom = boom.rotated(Vector3.RIGHT, boom_pitch)
+	var desired: Vector3 = _target.to_global(boom)
 	if _mode == Mode.COCKPIT:
 		global_transform = _target.global_transform.translated_local(cockpit_offset)
 		# Keep the third-person state live while inside, so leaving the cockpit

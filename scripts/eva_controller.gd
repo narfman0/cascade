@@ -405,6 +405,9 @@ func _enter_walk(body: CelestialBody) -> void:
 	_walk_airborne = true  # settle onto the ground over the first frames
 	_walk_sampler = null
 	_walk_sampler_age = 999
+	var rig := get_node_or_null("CameraRig")
+	if rig != null:
+		rig.set("boom_pitch", 0.0)
 
 
 ## Leave the walk into free flight, carrying the local velocity into world
@@ -419,6 +422,9 @@ func _exit_walk() -> void:
 	linear_velocity += vel_world
 	clamped_body = null
 	_walk_cooldown = 0.6
+	var rig := get_node_or_null("CameraRig")
+	if rig != null:
+		rig.set("boom_pitch", 0.0)
 
 
 ## One tick of the surface-local walk: run, jump, per-body gravity, terrain
@@ -435,11 +441,16 @@ func _walk(delta: float) -> void:
 	var g: float = clamped_body.def.surface_gravity \
 		* (body_radius * body_radius) / maxf(pos.length_squared(), 1.0)
 
-	# Yaw from the mouse; the suit stays upright against local up.
+	# Yaw turns the suit; pitch tilts only the camera boom — the body stays
+	# upright against local up, the eyes wander (LD6 third-person on foot).
 	var mouse := _mouse_delta_accum
 	_mouse_delta_accum = Vector2.ZERO
 	_walk_fwd = (_walk_fwd - up * _walk_fwd.dot(up)).normalized()
 	_walk_fwd = _walk_fwd.rotated(up, -mouse.x * 0.003)
+	var rig := get_node_or_null("CameraRig")
+	if rig != null:
+		rig.set("boom_pitch", clampf(
+			float(rig.get("boom_pitch")) + mouse.y * 0.003, -0.9, 0.55))
 	var right: Vector3 = _walk_fwd.cross(up)
 
 	var move: Vector3 = _walk_fwd * (Input.get_action_strength("thrust_forward")
