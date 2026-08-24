@@ -13,6 +13,11 @@
 #                                         #   No args after --pack = the
 #                                         #   DEFAULT_PACKS set below.
 #
+# Both modes end by running `godot --headless --import`, because a fetched .gltf
+# is inert until Godot bakes its .import sidecar and a missing import is silent
+# (the mesh just renders as nothing). Pass --no-import to skip it, or set GODOT
+# to point at a specific binary.
+#
 # Cascade-specific deviations from the godot-rts original (all deliberate):
 #   * .glb is NOT fetched. The space-pack .glb cooks have their `images` array
 #     stripped, so every material loses its baseColorTexture and the prop
@@ -27,6 +32,50 @@ cd "$(dirname "$0")"
 
 SERVER="${ASSET_SERVER:-http://srv.blastedstudios.com:49200}"
 DEST="assets/meshes"
+
+# --no-import is accepted in any position, in either mode. Strip it before the
+# mode dispatch below so it never shadows a pack name.
+SKIP_IMPORT=0
+_args=()
+for _a in "$@"; do
+	case "$_a" in
+		--no-import|--skip-import) SKIP_IMPORT=1 ;;
+		*) _args+=("$_a") ;;
+	esac
+done
+set -- ${_args[@]+"${_args[@]}"}
+
+# Godot is usually `godot`, but distro packages and manual installs use other
+# names; GODOT wins if set.
+find_godot() {
+	if [[ -n "${GODOT:-}" ]]; then
+		command -v "$GODOT" >/dev/null 2>&1 && { echo "$GODOT"; return 0; }
+		echo "GODOT is set to '$GODOT' but that is not executable." >&2
+		return 1
+	fi
+	local c
+	for c in godot godot4 godot-4; do
+		if command -v "$c" >/dev/null 2>&1; then echo "$c"; return 0; fi
+	done
+	return 1
+}
+
+# Bake .import sidecars for whatever was just fetched. Both modes end here.
+run_import() {
+	if (( SKIP_IMPORT )); then
+		echo "Fetched. Skipped import (--no-import) — run: godot --headless --import"
+		return 0
+	fi
+	local godot
+	if ! godot=$(find_godot); then
+		echo "Fetched, but no Godot binary found on PATH." >&2
+		echo "Run 'godot --headless --import' yourself, or re-run with GODOT=/path/to/godot." >&2
+		return 0
+	fi
+	echo "== importing ($godot --headless --import)"
+	"$godot" --headless --import
+	echo "Done."
+}
 
 # The space set. POLYGON_Scifi_Space is the spine; SciFiWorlds supplies the
 # scrap/satellite/antenna vocabulary; SIMPLE_Space supplies real-world
@@ -86,7 +135,7 @@ for p in d['cooked']['packs']:
 	python3 tools/fetch_material_lists.py || true
 	python3 tools/patch_gltf_materials.py || true
 	python3 tools/fetch_missing_textures.py || true
-	echo "Done. Run: godot --headless --import"
+	run_import
 	exit 0
 fi
 
@@ -106,4 +155,4 @@ python3 tools/patch_gltf_materials.py
 # whole-pack browsing sets too.
 python3 tools/resolve_assets.py
 python3 tools/fetch_missing_textures.py
-echo "Done. Run: godot --headless --import"
+run_import
