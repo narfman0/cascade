@@ -935,20 +935,42 @@ func _refresh_colliders() -> void:
 	if _skim_ship == null or not is_instance_valid(_skim_ship):
 		return
 	var ship_pos := _skim_ship.global_position
+	# Swap guard (LD4): while the hull hugs the ground, freeze the collider
+	# set in its footprint. A LOD change swaps in a different triangulation of
+	# the same relief, whose surface can sit metres from the old one — and a
+	# trimesh materializing inside a hull five metres off the deck gets that
+	# hull ejected by the solver at tens of m/s (measured: 68 m/s on climb-out
+	# at Earth). Far patches still swap freely; the footprint catches up the
+	# moment the ship climbs above the relief band.
+	var amp_m: float = radius * surface_res.amplitude
+	var alt: float = (ship_pos - global_position).length() - radius
+	var guard: bool = alt < amp_m + 80.0
 	var wanted: Dictionary = {}
 	var leaves: Array = []
 	for root in _roots:
 		_gather_leaves(root, leaves)
 	for node in leaves:
+		var span: float = PlanetPatchMesh.span_m(radius, node.depth)
 		var world_center: Vector3 = global_transform * node.center
-		var reach: float = skim_collider_range + PlanetPatchMesh.span_m(radius, node.depth)
+		var reach: float = skim_collider_range + span
 		if world_center.distance_to(ship_pos) > reach:
 			continue
 		wanted[node.key] = true
+		if (
+			guard and not _collider_nodes.has(node.key)
+			and world_center.distance_to(ship_pos) < span * 2.0 + 60.0
+		):
+			continue  # no new geometry under the hull
 		_ensure_collider(node)
 	for key in _collider_nodes.keys():
 		if not wanted.has(key):
-			_collider_nodes[key].queue_free()
+			var cs: CollisionShape3D = _collider_nodes[key]
+			if guard:
+				var center: Vector3 = _skim_body.global_transform * cs.position
+				var keep_r: float = float(cs.get_meta("guard_span", 60.0)) * 2.0 + 60.0
+				if center.distance_to(ship_pos) < keep_r:
+					continue  # keep the ground the hull is standing on
+			cs.queue_free()
 			_collider_nodes.erase(key)
 
 
@@ -971,6 +993,8 @@ func _ensure_collider(node: QuadNode) -> void:
 	var cs := CollisionShape3D.new()
 	cs.shape = entry.shape
 	cs.position = node.center
+	# The swap guard sizes its keep-radius from this after the node is gone.
+	cs.set_meta("guard_span", PlanetPatchMesh.span_m(radius, node.depth))
 	_skim_body.add_child(cs)
 	_collider_nodes[node.key] = cs
 

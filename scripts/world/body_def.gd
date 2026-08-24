@@ -76,6 +76,12 @@ class_name BodyDef
 ## Where the autopilot parks, as a multiple of `radius` from the centre.
 @export var arrival_standoff_scale: float = 2.5
 
+## Surface gravity in m/s², dramatized ×0.25 of the real value (Track LD3): the
+## 4 m/s² main engine must land Earth at a flyable thrust-to-weight (1.6 here;
+## real g gives 0.4 — unlandable). Zero means no gravity shell and no landing:
+## gas giants, the Sun, and anything else with no surface to stand on.
+@export var surface_gravity: float = 0.0
+
 ## Listed as an autopilot destination in the nav console.
 @export var is_destination: bool = true
 

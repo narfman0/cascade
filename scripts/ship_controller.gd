@@ -48,6 +48,9 @@ func _ready() -> void:
 	linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
 	angular_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
 	can_sleep = false
+	# Touchdown capture and rock latching both read current contacts (LD2/LD4).
+	contact_monitor = true
+	max_contacts_reported = 8
 	fuel_remaining = fuel_capacity
 	_assist_gain = assist_gain_override if assist_gain_override > 0.0 else mass * 2.0
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -78,12 +81,21 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# Gravity applies whenever the hull is live in the space — including while
+	# the pilot is outside on EVA: a ship parked inside a gravity shell falls,
+	# which is the shell being honest, not a bug (LD3).
+	var gravity := _gravity_accel()
+	if gravity != Vector3.ZERO and not freeze:
+		apply_central_force(gravity * mass)
+
 	# Docked counts as hands-off: the hull is frozen at the port and thrust
-	# would fight the freeze anyway.
+	# would fight the freeze anyway. Landed likewise; LandingComputer owns the
+	# takeoff input while the hull is glued to the ground.
 	if (
 		GameState.input_mode != GameState.InputMode.SHIP_FLIGHT
 		or GameState.autopilot_active
 		or GameState.docked
+		or GameState.landed
 	):
 		_mouse_delta_accum = Vector2.ZERO
 		return
@@ -100,6 +112,13 @@ func _physics_process(delta: float) -> void:
 	var max_axis := Vector3(thrust_rcs, thrust_rcs, thrust_rcs)
 	if input_local.z < 0.0:
 		max_axis.z = thrust_main  # forward burn uses main engine
+	# Belly landing jets (LD3): inside a gravity shell the vertical axis gets
+	# the main-engine budget. 15 kN of RCS against a 12 t hull is 1.25 m/s² —
+	# less than Earth's 2.45, so without this no upright hover, no braked
+	# descent, and no landing exists at all. Deep-space RCS feel is untouched;
+	# the jets light only where there is a surface to land on.
+	if gravity != Vector3.ZERO:
+		max_axis.y = thrust_main
 
 	var thrust_local := Vector3(
 		input_local.x * max_axis.x,
@@ -113,9 +132,14 @@ func _physics_process(delta: float) -> void:
 	# beside Europa you want to stay beside Europa, and Europa is moving.
 	if GameState.flight_assist_enabled and fuel_remaining > 0.0:
 		var v_local: Vector3 = global_basis.transposed() * (linear_velocity - reference_velocity())
+		# Gravity feed-forward (LD3): inside a shell, holding station means
+		# thrusting against the pull, not reacting to the sag it causes. The
+		# per-axis clamp is what keeps this honest — a craft whose thrust can't
+		# beat local gravity still falls (the suit on Earth, by design).
+		var g_local: Vector3 = global_basis.transposed() * gravity
 		for axis in 3:
 			if is_zero_approx(input_local[axis]):
-				var counter: float = -v_local[axis] * _assist_gain
+				var counter: float = -v_local[axis] * _assist_gain - g_local[axis] * mass
 				counter = clampf(counter, -max_axis[axis], max_axis[axis])
 				thrust_local[axis] += counter
 
@@ -197,6 +221,13 @@ func stow_character() -> void:
 		character = get_node_or_null("Character")
 	if character and character.has_method("stow"):
 		character.stow()
+
+
+## Local gravitational acceleration (LD3) — zero outside every surface shell.
+func _gravity_accel() -> Vector3:
+	if system == null:
+		return Vector3.ZERO
+	return system.gravity_at(OriginShift.to_true(global_position))
 
 
 ## Velocity of the reference frame flight assist should hold station in: the

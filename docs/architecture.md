@@ -296,7 +296,7 @@ This is why the EVA suit is **removed from the scene tree** while the player is 
 
 Related: the physics server owns a live `RigidBody3D`'s transform and reverts writes from script. Setting the ship's transform or basis only works while it is frozen, which is why the autopilot freezes before steering.
 
-## Landing (Track LD — designed, awaiting owner approval; see tasks.md)
+## Landing (Track LD — BUILT; gates in tests/anchor_test.gd and tests/landing_test.gd)
 
 Two tiers, because the physics regimes are genuinely different: at debris and
 asteroid masses gravity is negligible and "landing" is contact-and-latch; at
@@ -355,6 +355,25 @@ on Earth at TWR 1.6 (lunar-module feel) and the suit (2.0 m/s² of thrust)
 still cannot hover on Earth but flies freely on the Moon — EVA capability
 becomes a per-body fact. Gas giants get no shell and no landing; the nav
 console says why.
+
+**Belly landing jets.** The vertical RCS (15 kN) is weaker than the hull's
+weight on Earth (29 kN), so inside a gravity shell the ship's vertical axis
+gets the main-engine budget — that is where TWR 1.6 comes from, and it lights
+only where there is a surface to land on, leaving deep-space RCS feel alone.
+Flight assist adds a gravity feed-forward term inside shells (holding station
+means thrusting against the pull, not reacting to the sag), and the per-axis
+clamp keeps it honest: attitude matters, and a craft whose thrust cannot beat
+local gravity still falls.
+
+**Skim-collider swap guard.** A LOD change swaps in a different triangulation
+of the same relief; a trimesh materializing inside a hull a few metres off
+the deck gets that hull solver-ejected at tens of m/s (measured 68 m/s).
+While a hull is within the relief band of the ground, the collider set in
+its footprint is frozen — no adds, no frees — and far patches keep swapping
+freely. Landing also disarms its own capture on lift-off until the ground
+has been clear for a beat, and pushes off at 2.5 m/s (both the docking
+computer's patterns), because a live hull left resting on per-frame-
+teleporting colliders is eventually thrown.
 
 **Landed is a state, not a contact.** Touchdown capture mirrors docking
 soft-capture: contact with the skim colliders, surface-relative speed under

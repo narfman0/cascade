@@ -48,6 +48,7 @@ static func build() -> Array[BodyDef]:
 		[0.0, Color(0.33, 0.31, 0.29)], [0.5, Color(0.55, 0.51, 0.47)],
 		[1.0, Color(0.70, 0.66, 0.62)]]))
 	_spin(mercury, 4000.0, 0.01)
+	mercury.surface_gravity = 0.93
 	bodies.append(mercury)
 
 	var venus := BodyDef.make(&"venus", "Venus", 1900.0, &"sun",
@@ -61,6 +62,7 @@ static func build() -> Array[BodyDef]:
 	venus.surface.band_wobble = 1.4
 	venus.atmosphere = BodyAtmosphere.venus()
 	_spin(venus, 6000.0, 0.05)
+	venus.surface_gravity = 2.27
 	bodies.append(venus)
 
 	var earth := BodyDef.make(&"earth", "Earth", EARTH_RADIUS, &"sun",
@@ -89,6 +91,7 @@ static func build() -> Array[BodyDef]:
 	# photo would show them.
 	earth.cloud_map = _map("earth_clouds")
 	_spin(earth, 1800.0, 0.41)
+	earth.surface_gravity = 2.45
 	bodies.append(earth)
 
 	var moon := BodyDef.make(&"moon", "Moon", 550.0, &"earth",
@@ -99,6 +102,7 @@ static func build() -> Array[BodyDef]:
 		[1.0, Color(0.78, 0.77, 0.75)]]))
 	_authored(moon.surface, "moon")
 	_spin(moon, 1800.0, 0.03)   # tidally locked: spin period = orbit period
+	moon.surface_gravity = 0.40
 	bodies.append(moon)
 
 	var mars := BodyDef.make(&"mars", "Mars", 1100.0, &"sun",
@@ -110,6 +114,7 @@ static func build() -> Array[BodyDef]:
 	_authored(mars.surface, "mars")
 	mars.atmosphere = BodyAtmosphere.mars()
 	_spin(mars, 1900.0, 0.44)
+	mars.surface_gravity = 0.93
 	bodies.append(mars)
 
 	# --- Outer system ---
@@ -132,6 +137,7 @@ static func build() -> Array[BodyDef]:
 		[0.0, Color(0.55, 0.44, 0.18)], [0.4, Color(0.85, 0.78, 0.42)],
 		[0.7, Color(0.93, 0.86, 0.55)], [1.0, Color(0.76, 0.48, 0.24)]]))
 	_spin(io, 1200.0, 0.02)
+	io.surface_gravity = 0.45
 	bodies.append(io)
 
 	var europa := BodyDef.make(&"europa", "Europa", 460.0, &"jupiter",
@@ -141,6 +147,7 @@ static func build() -> Array[BodyDef]:
 		[0.0, Color(0.66, 0.58, 0.50)], [0.5, Color(0.82, 0.82, 0.80)],
 		[1.0, Color(0.94, 0.94, 0.93)]]))
 	_spin(europa, 1800.0, 0.02)
+	europa.surface_gravity = 0.33
 	bodies.append(europa)
 
 	var ganymede := BodyDef.make(&"ganymede", "Ganymede", 700.0, &"jupiter",
@@ -149,6 +156,7 @@ static func build() -> Array[BodyDef]:
 		[0.0, Color(0.38, 0.36, 0.33)], [0.5, Color(0.60, 0.58, 0.54)],
 		[1.0, Color(0.80, 0.78, 0.74)]]))
 	_spin(ganymede, 2700.0, 0.02)
+	ganymede.surface_gravity = 0.36
 	bodies.append(ganymede)
 
 	var callisto := BodyDef.make(&"callisto", "Callisto", 660.0, &"jupiter",
@@ -157,6 +165,7 @@ static func build() -> Array[BodyDef]:
 		[0.0, Color(0.28, 0.26, 0.24)], [0.6, Color(0.45, 0.42, 0.40)],
 		[1.0, Color(0.67, 0.62, 0.57)]]))
 	_spin(callisto, 4200.0, 0.02)
+	callisto.surface_gravity = 0.31
 	bodies.append(callisto)
 
 	var saturn := BodyDef.make(&"saturn", "Saturn", 7000.0, &"sun",
@@ -178,6 +187,7 @@ static func build() -> Array[BodyDef]:
 		[1.0, Color(0.86, 0.73, 0.48)]]))
 	titan.atmosphere = BodyAtmosphere.titan()
 	_spin(titan, 3600.0, 0.02)
+	titan.surface_gravity = 0.34
 	bodies.append(titan)
 
 	var uranus := BodyDef.make(&"uranus", "Uranus", 4000.0, &"sun",

@@ -8,9 +8,10 @@ renderer)**. The original directive stands underneath: model 3D flight
 accurately; movement correctness before content.
 
 **Flight feel SIGNED OFF by owner 2026-08-23** ("flight feel is good") — the
-M1/M2 human-feel gate on M3 is satisfied. M3 (debris/tools/contracts) is now
-unblocked and is the main line once Track LD's plan is approved; LD Tier 1
-(rocks + latching) is deliberately shaped to BE the M3 debris substrate.
+M1/M2 human-feel gate on M3 is satisfied. Track LD is BUILT (owner approved
+2026-08-24): **M3 (debris/tools/contracts) is now the main line**, and its
+debris substrate already exists — `SpaceRock` fields with wake/sleep and
+latching are live in the world. Contracts hang directly off them.
 
 **Running the suites:** all six exit cleanly and fast — travel ~8 s, docking
 ~7 s, eva ~8 s, station ~12 s, planet ~127 s, atmosphere ~35 s, every one exit 0. If a suite ever
@@ -25,6 +26,9 @@ them in `_exit_tree` (see `PlanetSurface._exit_tree`).
 4. Children `_ready` before parents: never place world content against the render origin in a child's `_ready` — GameWorld establishes the origin, then calls `refresh()`. Follow that bootstrap pattern.
 5. The ship station-keeps at ~131 m/s absolute (Earth's orbital velocity). Anything that must stay near it has to co-move; a one-shot teleport falls behind ~2 m per physics tick.
 6. After any change to flight, world, autopilot, or docking code, run BOTH suites: `godot --headless res://tests/travel_test.tscn` and `res://tests/eva_test.tscn`. They are the regression net for everything above.
+7. GDScript lambdas capture locals BY VALUE: a `var fired := false` flipped inside a signal-connected lambda never propagates out. Mutate through an array cell (`var fired := [false]`) or an instance var.
+8. In test harnesses, a held teleport target goes stale the moment an origin shift fires mid-hold (and the world it targets is itself moving at ~131 m/s) — pose targets must be Callables re-evaluated every held frame, never fixed vectors (see anchor_test `_park_ship_at`).
+9. Never rest a live RigidBody3D in contact with the rail-driven world (skim terrain, station hulls): the colliders teleport every frame and the solver eventually ejects the body violently. Frozen-and-parented states (docked, landed, clamped) exist precisely to avoid this; on release, push off and re-arm capture only after contact clears.
 
 Read `docs/architecture.md` before starting. Scene tree, physics approach, and autoload responsibilities defined there are authoritative.
 
@@ -414,7 +418,7 @@ The design questions queued here are all answered in **architecture.md §
 Landing**; the implementation-ready breakdown is **Track LD**. Nothing is
 built. Owner approves the plan (or amends it) before LD1 starts.
 
-## Track LD — Landing (PLANNED 2026-08-23; build gated on owner approval)
+## Track LD — Landing (BUILT 2026-08-24; LD5 partial — HUD done, polish open)
 
 Full design rationale in architecture.md § Landing. Decisions in one breath:
 rocks are a new free-physics class that sleeps on rails and wakes with a
@@ -426,34 +430,59 @@ pattern anchored by the site-transform chain, takeoff is the EVA-exit velocity
 handoff. Suit hovers on the Moon, not on Earth — on purpose. Gas giants: no.
 
 ### LD1 — SpaceRock class + fields
-- [ ] `SpaceRock` (RigidBody3D): procedural rock mesh + convex collision, sizes 2–50 m, masses 0.5–20 t, spin seeded.
-- [ ] Sleep-on-rails: kinematic follow under the field's `OrbitalAnchor`; wake within ~500 m of the player with anchor-frame velocity handed off; re-sleep when abandoned.
-- [ ] Field spawner config on `OrbitalAnchor` fields (count, size/mass ranges, seed) — the M3 debris substrate.
-- [ ] Gates (`tests/anchor_test.gd`, new suite): woken rock co-moves with its field (< 0.1 m/s error), tumble persists, sleeping rock tracks the anchor under warp.
+- [x] `SpaceRock` (RigidBody3D): procedural rock mesh + convex collision, sizes 2–50 m, masses 0.5–20 t, spin seeded.
+- [x] Sleep-on-rails: kinematic follow under the field's `OrbitalAnchor`; wake within ~500 m of the player with anchor-frame velocity handed off; re-sleep when abandoned.
+- [x] Field spawner config on `OrbitalAnchor` fields (count, size/mass ranges, seed) — the M3 debris substrate.
+- [x] Gates (`tests/anchor_test.gd`, new suite): woken rock co-moves with its field (< 0.1 m/s error), tumble persists, sleeping rock tracks the anchor under warp.
 
 ### LD2 — Latching (ship clamps + suit boots)
-- [ ] Latch: contact + relative velocity < 0.5 m/s + input → locked `Generic6DOFJoint3D`. Unlatch on input; force-limit break (clamp rating vs towed mass).
-- [ ] Suit boot clamps: same joint; torque-only control while clamped; push off by exceeding the break limit.
-- [ ] HUD: latch-ready indicator (the docking-computer pattern), latched-state readout.
-- [ ] Gates: latch succeeds under threshold and refuses over it; ship+rock couple tows under thrust with combined-mass acceleration; release is impulse-clean; jointed suit rides a tumbling rock.
+- [x] Latch: contact + relative velocity < 0.5 m/s + input → locked `Generic6DOFJoint3D`. Unlatch on input; force-limit break (clamp rating vs towed mass).
+- [x] Suit boot clamps: same joint; torque-only control while clamped; push off by exceeding the break limit.
+- [x] HUD: latch-ready indicator (the docking-computer pattern), latched-state readout.
+- [x] Gates: latch succeeds under threshold and refuses over it; ship+rock couple tows under thrust with combined-mass acceleration; release is impulse-clean; jointed suit rides a tumbling rock.
 
 ### LD3 — Gravity shells
-- [ ] `SolarSystem.gravity_at(true_pos)`: inverse-square inside each solid body's shell (surface → 1.5 R), smooth fade at the top, zero elsewhere; per-body `surface_gravity` in `SolarSystemData` at ×0.25 real (Earth 2.45, Mars 0.93, Moon 0.40 m/s²); gas giants none.
-- [ ] Ship + suit apply it in `_physics_process`; flight assist gains a gravity feed-forward term so station-keeping in a shell holds altitude without sag.
-- [ ] Autopilot: integrator adds the same term; engagement refused from inside a shell ("TAKE OFF FIRST").
-- [ ] Gates (travel + new checks): field values at R/1.2 R/1.6 R (zero), every arrival standoff outside every shell, FA hover drift < 0.2 m/s, all existing transfer gates unchanged.
+- [x] `SolarSystem.gravity_at(true_pos)`: inverse-square inside each solid body's shell (surface → 1.5 R), smooth fade at the top, zero elsewhere; per-body `surface_gravity` in `SolarSystemData` at ×0.25 real (Earth 2.45, Mars 0.93, Moon 0.40 m/s²); gas giants none.
+- [x] Ship + suit apply it in `_physics_process`; flight assist gains a gravity feed-forward term so station-keeping in a shell holds altitude without sag.
+- [x] Autopilot: integrator adds the same term; engagement refused from inside a shell ("TAKE OFF FIRST").
+- [x] Gates (travel + new checks): field values at R/1.2 R/1.6 R (zero), every arrival standoff outside every shell, FA hover drift < 0.2 m/s, all existing transfer gates unchanged.
 
 ### LD4 — Touchdown + the landed state
-- [ ] Capture: skim-collider contact + surface-relative speed < 2 m/s + up-alignment < 25°, else bounce. On capture: freeze, `body_set_space(RID())`, leave `origin_shiftable`, record surface-local pose.
-- [ ] Landed placement each frame via the site-transform chain — co-rotation for free; verify against a surface point over half a spin period (the site antipodal-test pattern).
-- [ ] Takeoff: re-enter space at the anchor pose with surface-point velocity (frame + ω×r) handed off; a thrust-up hold triggers it.
-- [ ] EVA while landed: exit works, suit falls under shell gravity, boot-clamp latch to the ground = LD2 path; Moon EVA flies, Earth EVA stays clamped (TWR < 1) — assert both.
-- [ ] Gates (`tests/landing_test.gd`, new suite): scripted descent → landed on Earth and Moon, co-rotation tracks, takeoff clean (no teleport frame, velocity error < 0.1 m/s), origin shift while landed does not move the ship relative to the surface, all six existing suites green.
+- [x] Capture: skim-collider contact + surface-relative speed < 2 m/s + up-alignment < 25°, else bounce. On capture: freeze, `body_set_space(RID())`, leave `origin_shiftable`, record surface-local pose.
+- [x] Landed placement each frame via the site-transform chain — co-rotation for free; verify against a surface point over half a spin period (the site antipodal-test pattern).
+- [x] Takeoff: re-enter space at the anchor pose with surface-point velocity (frame + ω×r) handed off; a thrust-up hold triggers it.
+- [x] EVA while landed: exit works, suit falls under shell gravity, boot-clamp latch to the ground = LD2 path; Moon EVA flies, Earth EVA stays clamped (TWR < 1) — assert both.
+- [x] Gates (`tests/landing_test.gd`, new suite): scripted descent → landed on Earth and Moon, co-rotation tracks, takeoff clean (no teleport frame, velocity error < 0.1 m/s), origin shift while landed does not move the ship relative to the surface, all six existing suites green.
 
-### LD5 — Descent presentation + HUD (polish, after LD4 proves out)
-- [ ] Radar altimeter + surface-relative velocity vector on the HUD inside shells (the numbers that make a landing flyable).
-- [ ] Descent look: existing aerial perspective + reddened terminator light already carry it; add only camera shake ramp on shell entry if it reads as nothing otherwise. No new shader work.
-- [ ] Scope statement honored: land, look, take off. No walking, no ground content — a later owner-approved track if ever.
+### LD5 — Descent presentation + HUD (HUD built; look-pass open)
+- [x] SURFACE panel on the HUD inside shells: radial ALT, VSPD (green under the 2 m/s capture limit), lateral HSPD; LANDED banner with the lift-off hint; latch prompts (G — Latch / LATCHED / CLAMPED / GROUNDED).
+- [ ] Descent look: aerial perspective + reddened terminator light already carry it; judge in play whether shell-entry needs anything more. No new shader work planned.
+- [x] Scope statement honored: land, look, take off. No walking, no ground content — a later owner-approved track if ever.
+
+**Build findings (2026-08-24) — three things the gates caught:**
+1. **Belly landing jets.** 15 kN of vertical RCS against the 12 t hull is
+   1.25 m/s² — less than Earth's 2.45, so no upright hover, braked descent,
+   or landing could exist at all. Inside a gravity shell the vertical axis now
+   gets the main-engine budget (48 kN → TWR 1.6, the plan's promised number);
+   deep-space RCS feel is untouched. Attitude matters: gravity on a flat
+   ship's RCS axes still sinks it, by design (the FA hover gate parks upright).
+2. **Skim-collider swap guard (real pre-existing hazard).** A LOD change swaps
+   in a different triangulation of the same relief; a trimesh materializing
+   inside a hull 5 m off the deck got it ejected at a measured 68 m/s on
+   climb-out. While a hull is within the relief band + 80 m, the collider set
+   in its footprint is frozen (no adds, no frees); far patches swap freely.
+3. **Capture re-arm + push-off.** Lift-off leaves the hull in contact at zero
+   relative speed — exactly the capture conditions — so capture disarms on
+   release and re-arms after 10 ground-clear frames (the docking pattern), and
+   release adds a 2.5 m/s vertical push-off (the undock pattern): a live hull
+   left resting on per-frame-teleporting colliders is eventually thrown by
+   the solver.
+
+Suites: `anchor_test` (16 checks) and `landing_test` (23 checks) — both green,
+all six prior suites green. Two harness traps for the standing list:
+GDScript lambdas capture locals BY VALUE (signal-fired flags need an array
+cell), and a held teleport goes stale when an origin shift fires mid-hold —
+pose targets must be Callables re-evaluated per frame, never fixed vectors.
 
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 

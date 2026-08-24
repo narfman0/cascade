@@ -79,6 +79,61 @@ modulate = Color(0.7, 0.75, 0.78, 1)
 text = "AXIS    0.0°"
 modulate = Color(0.7, 0.75, 0.78, 1)
 
+[node name="LandingPanel" type="VBoxContainer" parent="Root"]
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -280.0
+offset_top = 160.0
+offset_right = -24.0
+offset_bottom = 276.0
+theme_override_constants/separation = 6
+mouse_filter = 2
+visible = false
+
+[node name="LandingTitle" type="Label" parent="Root/LandingPanel"]
+text = "SURFACE"
+modulate = Color(0.72, 0.78, 0.8, 1)
+
+[node name="LandingAlt" type="Label" parent="Root/LandingPanel"]
+text = "ALT     0 m"
+modulate = Color(0.7, 0.75, 0.78, 1)
+
+[node name="LandingVspd" type="Label" parent="Root/LandingPanel"]
+text = "VSPD    0.0 m/s"
+modulate = Color(0.7, 0.75, 0.78, 1)
+
+[node name="LandingHspd" type="Label" parent="Root/LandingPanel"]
+text = "HSPD    0.0 m/s"
+modulate = Color(0.7, 0.75, 0.78, 1)
+
+[node name="LandedLabel" type="Label" parent="Root"]
+anchor_left = 0.5
+anchor_top = 0.15
+anchor_right = 0.5
+anchor_bottom = 0.15
+offset_left = -240.0
+offset_top = -12.0
+offset_right = 240.0
+offset_bottom = 12.0
+text = ""
+horizontal_alignment = 1
+modulate = Color(0.68, 0.86, 0.78, 1)
+visible = false
+
+[node name="LatchLabel" type="Label" parent="Root"]
+anchor_left = 0.5
+anchor_top = 0.8
+anchor_right = 0.5
+anchor_bottom = 0.8
+offset_left = -200.0
+offset_top = -12.0
+offset_right = 200.0
+offset_bottom = 12.0
+text = ""
+horizontal_alignment = 1
+modulate = Color(0.68, 0.86, 0.78, 1)
+visible = false
+
 [node name="DockedLabel" type="Label" parent="Root"]
 anchor_left = 0.5
 anchor_top = 0.11

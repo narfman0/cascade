@@ -23,6 +23,16 @@ const SUN_BASE_ENERGY: float = 1.5
 const SUN_ENERGY_FLOOR: float = 0.12
 const SUN_ENERGY_CAP: float = 2.5
 
+## Gravity is a SURFACE SHELL, not a global field (Track LD3). The rails are
+## dramatized — Meridian Relay's rail speed at 9 km matches no honest g(r), so
+## a global field would drop every parked ship, station, and debris field out
+## of the sky. Inside the shell gravity is inverse-square from the dramatized
+## surface value, faded smoothly to zero across the top band; outside it,
+## space rules exactly as before. Every autopilot standoff sits outside every
+## shell (gated in travel_test), so transfers and parks are untouched.
+const GRAVITY_SHELL_TOP: float = 1.5     # shell reaches this many radii
+const GRAVITY_FADE_START: float = 1.35   # fade from full here to zero at top
+
 signal system_built
 
 ## Unit vector from the render origin toward the Sun, refreshed every frame
@@ -321,6 +331,46 @@ func sun_filter_at(true_pos: Array) -> Vector3:
 		var half := AtmosphereMath.transmittance(atmo, maxf(perigee, 1.0), 0.0, 24)
 		tint *= half * half
 	return tint
+
+
+## --- Gravity (Track LD3) ------------------------------------------------------
+
+## World-space gravitational acceleration at a true-space position. Zero
+## everywhere except inside a solid body's surface shell; shells never overlap
+## (1.5 R is far inside every orbit), so at most one body contributes.
+func gravity_at(true_pos: Array) -> Vector3:
+	for body in bodies:
+		var g0: float = body.def.surface_gravity
+		if g0 <= 0.0:
+			continue
+		var r_vec := Vector3(
+			float(body.true_pos[0] - true_pos[0]),
+			float(body.true_pos[1] - true_pos[1]),
+			float(body.true_pos[2] - true_pos[2]))
+		var radius: float = body.def.radius
+		var r: float = r_vec.length()
+		if r >= radius * GRAVITY_SHELL_TOP or r < 1e-3:
+			continue
+		var fade: float = 1.0 - smoothstep(
+			radius * GRAVITY_FADE_START, radius * GRAVITY_SHELL_TOP, r)
+		var rr: float = maxf(r, radius)  # inside the ground: no singularity
+		return r_vec / r * (g0 * (radius * radius) / (rr * rr) * fade)
+	return Vector3.ZERO
+
+
+## The body whose gravity shell contains a true-space position, or null in
+## open space — what the landing computer and the autopilot's engage check ask.
+func landable_body_at(true_pos: Array) -> CelestialBody:
+	for body in bodies:
+		if body.def.surface_gravity <= 0.0:
+			continue
+		var dx: float = true_pos[0] - body.true_pos[0]
+		var dy: float = true_pos[1] - body.true_pos[1]
+		var dz: float = true_pos[2] - body.true_pos[2]
+		var r: float = sqrt(dx * dx + dy * dy + dz * dz)
+		if r < body.def.radius * GRAVITY_SHELL_TOP:
+			return body
+	return null
 
 
 ## --- Queries -----------------------------------------------------------------

@@ -11,6 +11,7 @@ signal flight_assist_changed(enabled: bool)
 signal input_mode_changed(mode: InputMode)
 signal autopilot_active_changed(active: bool)
 signal docked_changed(is_docked: bool)
+signal landed_changed(is_landed: bool)
 
 var flight_assist_enabled: bool = true:
 	set(value):
@@ -40,6 +41,16 @@ var autopilot_active: bool = false:
 ## True while the ship is soft-captured at a docking port. Flight controls and
 ## the autopilot stand down; `interact` means undock. Set only by
 ## DockingComputer, which owns the capture/release sequencing.
+## Landed on a body's surface (Track LD4). Same shape as `docked`: the hull is
+## frozen out of the physics space, flight controls stand down, and the
+## landing computer owns the takeoff gesture.
+var landed: bool = false:
+	set(value):
+		if value == landed:
+			return
+		landed = value
+		landed_changed.emit(landed)
+
 var docked: bool = false:
 	set(value):
 		if value == docked:

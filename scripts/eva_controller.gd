@@ -44,6 +44,16 @@ var _in_cargo_bay: bool = false
 signal boarded
 signal exited
 
+# --- Latching (LD2/LD4) ---
+## Boot clamps: on a SpaceRock this is a locked joint (the suit rides the
+## tumble); on a planet surface it is the shared landed-state capture. Push off
+## a rock by holding translation thrust; lift off ground by holding thrust_up.
+var clamped_rock: SpaceRock = null
+var clamped_body: CelestialBody = null
+var _rock_joint: Generic6DOFJoint3D = null
+var _clamp_parent: Node = null
+var _push_hold: float = 0.0
+
 var _mouse_delta_accum: Vector2 = Vector2.ZERO
 var _assist_gain: float = 0.0
 
@@ -56,6 +66,9 @@ func _ready() -> void:
 	linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
 	angular_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
 	can_sleep = false
+	# Boot clamps read current contacts (LD2/LD4).
+	contact_monitor = true
+	max_contacts_reported = 8
 	_assist_gain = assist_gain_override if assist_gain_override > 0.0 else mass * 4.0
 	if fuel == null:
 		fuel = EVAThrusterFuel.new()
@@ -80,10 +93,50 @@ func _unhandled_input(event: InputEvent) -> void:
 			_mouse_delta_accum += (event as InputEventMouseMotion).relative
 		if event.is_action_pressed("interact") and _in_cargo_bay:
 			request_board()
+		if event.is_action_pressed("latch"):
+			if clamped_rock != null:
+				release_rock()
+			elif clamped_body == null:
+				try_latch()
 
 
 func _physics_process(delta: float) -> void:
 	if GameState.input_mode != GameState.InputMode.EVA:
+		_mouse_delta_accum = Vector2.ZERO
+		return
+
+	# Ground-clamped: frozen out of the space, riding the surface through the
+	# tree. Only the lift-off hold is live (thrust_up, deliberate).
+	if clamped_body != null:
+		if Input.get_action_strength("thrust_up") > 0.5:
+			_push_hold += delta
+			if _push_hold >= 0.3:
+				release_ground()
+		else:
+			_push_hold = 0.0
+		_mouse_delta_accum = Vector2.ZERO
+		return
+
+	# Gravity (LD3): the suit falls inside a shell like everything else live.
+	var gravity := _gravity_accel()
+	if gravity != Vector3.ZERO and not freeze:
+		apply_central_force(gravity * mass)
+
+	# Rock-clamped: a sustained shove is the unlatch gesture — the joint drops
+	# and the same thrust pushes you off (LD2).
+	if clamped_rock != null:
+		var shove := Vector3(
+			Input.get_action_strength("thrust_right") - Input.get_action_strength("thrust_left"),
+			Input.get_action_strength("thrust_up") - Input.get_action_strength("thrust_down"),
+			Input.get_action_strength("thrust_back") - Input.get_action_strength("thrust_forward"))
+		if shove.length() > 0.7:
+			_push_hold += delta
+			if _push_hold >= 0.3:
+				release_rock()
+		else:
+			_push_hold = 0.0
+		# Bolted on: the locked joint owns the pose, thrusters stand down (and
+		# flight assist must not burn fuel fighting the rock's own tumble).
 		_mouse_delta_accum = Vector2.ZERO
 		return
 
@@ -102,10 +155,14 @@ func _physics_process(delta: float) -> void:
 
 	if GameState.flight_assist_enabled and fuel.remaining > 0.0:
 		# Station-keeping is measured against the local body, same as the ship.
+		# Gravity feed-forward matches the ship too — and the per-axis clamp is
+		# the whole point: 2.0 m/s² of suit thrust against Earth's 2.45 still
+		# falls. EVA flight is a per-body capability, not a given (LD3).
 		var v_local: Vector3 = global_basis.transposed() * relative_velocity()
+		var g_local: Vector3 = global_basis.transposed() * gravity
 		for axis in 3:
 			if is_zero_approx(input_local[axis]):
-				var counter: float = -v_local[axis] * _assist_gain
+				var counter: float = -v_local[axis] * _assist_gain - g_local[axis] * mass
 				counter = clampf(counter, -max_axis[axis], max_axis[axis])
 				thrust_local[axis] += counter
 
@@ -151,6 +208,10 @@ func _physics_process(delta: float) -> void:
 ## Take the suit out of the physics space and out of the tree. Called at
 ## bootstrap and whenever the player boards.
 func stow() -> void:
+	# Defensive: a clamped suit being stowed must drop its anchors first.
+	release_rock()
+	if clamped_body != null:
+		clamped_body = null  # boarding from clamped never happens; don't hand off
 	var cs := get_node_or_null("CollisionShape3D") as CollisionShape3D
 	if cs:
 		cs.disabled = true
@@ -222,6 +283,52 @@ func _on_cargo_exited(body: Node) -> void:
 		_in_cargo_bay = false
 
 
+# --- Boot clamps (LD2/LD4) ---
+
+## Latch to whatever the boots are touching: a SpaceRock gets a locked joint
+## (ride the tumble), a landable body gets the shared landed-state capture.
+func try_latch() -> void:
+	var system = _ship.get("system") if _ship else null
+	for body in get_colliding_bodies():
+		var rock := body as SpaceRock
+		if rock != null and not rock.asleep:
+			if (linear_velocity - rock.linear_velocity).length() <= 1.0:
+				_rock_joint = LatchComputer.make_lock_joint(self, rock)
+				clamped_rock = rock
+				_push_hold = 0.0
+			return
+		# Ground: any collider whose ancestry reaches a landable body.
+		if system != null:
+			var node: Node = body
+			while node != null:
+				var cb := node as CelestialBody
+				if cb != null and cb.def.surface_gravity > 0.0:
+					var v_rel: Vector3 = linear_velocity \
+						- LandingComputer.surface_point_velocity(cb, global_position)
+					if v_rel.length() <= 2.0:
+						_clamp_parent = LandingComputer.clamp_to_surface(self, cb)
+						clamped_body = cb
+						_push_hold = 0.0
+					return
+				node = node.get_parent()
+
+
+func release_rock() -> void:
+	if _rock_joint != null:
+		_rock_joint.queue_free()
+		_rock_joint = null
+	clamped_rock = null
+	_push_hold = 0.0
+
+
+func release_ground() -> void:
+	if clamped_body == null:
+		return
+	LandingComputer.release_from_surface(self, clamped_body, _clamp_parent)
+	clamped_body = null
+	_push_hold = 0.0
+
+
 ## Velocity of the frame the suit should hold station in — inherited from the
 ## ship's system reference so EVA near Europa parks against Europa.
 func reference_velocity() -> Vector3:
@@ -235,6 +342,16 @@ func reference_velocity() -> Vector3:
 
 func relative_velocity() -> Vector3:
 	return linear_velocity - reference_velocity()
+
+
+## Local gravitational acceleration (LD3), via the ship's system reference.
+func _gravity_accel() -> Vector3:
+	if _ship == null:
+		return Vector3.ZERO
+	var system = _ship.get("system")
+	if system == null:
+		return Vector3.ZERO
+	return system.gravity_at(OriginShift.to_true(global_position))
 
 
 func can_board() -> bool:

@@ -93,11 +93,19 @@ func setup(system: SolarSystem) -> void:
 func can_engage() -> bool:
 	# Docked means physically attached to a port — the station undocks you, the
 	# autopilot does not tear you off it.
-	return phase == Phase.IDLE and _ship != null and _system != null and not GameState.docked
+	return (
+		phase == Phase.IDLE and _ship != null and _system != null
+		and not GameState.docked and not GameState.landed
+	)
 
 
 func engage(destination: NavTarget) -> bool:
 	if not can_engage() or destination == null:
+		return false
+	# Inside a gravity shell the analytic transfer's frozen-hull assumption is
+	# a lie — the well owns you until you climb out of it, by hand (LD3).
+	if _system.landable_body_at(OriginShift.to_true(_ship.global_position)) != null:
+		cancelled.emit("in gravity well — climb above the shell first")
 		return false
 	target = destination
 	_pos = OriginShift.to_true(_ship.global_position)
@@ -275,6 +283,14 @@ func _step(dt_sim: float) -> void:
 		dv_len = dv_budget
 	_vel_rel = OriginShift.dv_add(_vel_rel, dv)
 	_dv_spent += dv_len
+
+	# Gravity shells (LD3): the same field the live ship feels. Standoffs sit
+	# outside every shell so this is normally zero; a route that skims one gets
+	# the honest tug, and the closed-loop guidance absorbs it.
+	var g: Vector3 = _system.gravity_at(_pos)
+	if g != Vector3.ZERO:
+		_vel_rel = OriginShift.dv_add(_vel_rel, [
+			g.x * dt_sim, g.y * dt_sim, g.z * dt_sim])
 
 	# Integrate true position with the target's motion folded back in.
 	var world_vel: Array = OriginShift.dv_add(_vel_rel, target_vel)

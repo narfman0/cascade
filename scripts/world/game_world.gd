@@ -93,6 +93,10 @@ func _wire_systems() -> void:
 	if autopilot:
 		autopilot.setup(_system)
 
+	var landing := _ship.get_node_or_null("LandingComputer") as LandingComputer
+	if landing:
+		landing.setup(_system)
+
 	# Stations register after the origin exists — registration places them, so
 	# doing it from a station's own _ready would race the bootstrap.
 	var station := get_node_or_null("MeridianRelay") as OrbitalStation
@@ -104,6 +108,17 @@ func _wire_systems() -> void:
 		_debris_anchor.body_id = spawn_body_id
 		_debris_anchor.anchor_offset = spawn_direction.normalized() * SolarSystemData.SPAWN_ALTITUDE
 		_debris_anchor.setup(_system)
+
+	# The rock field (LD1): free-physics debris a few hundred metres along-track
+	# from the authored props, same orbit. Sleeps on rails, wakes on approach.
+	var rock_field := RockField.new()
+	rock_field.name = "RockField"
+	rock_field.body_id = spawn_body_id
+	rock_field.anchor_offset = (
+		spawn_direction.normalized() * SolarSystemData.SPAWN_ALTITUDE
+		+ spawn_direction.normalized().cross(Vector3.UP).normalized() * 600.0)
+	add_child(rock_field)
+	rock_field.setup(_system)
 
 	var hud := get_node_or_null("HUD")
 	if hud and hud.has_method("bind_world"):

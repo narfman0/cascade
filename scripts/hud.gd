@@ -21,6 +21,12 @@ extends CanvasLayer
 @onready var _docked_label: Label = $Root/DockedLabel
 @onready var _prograde_marker: Control = $Root/PrograteMarker
 @onready var _prograde_dot: ColorRect = $Root/PrograteMarker/Dot
+@onready var _landing_panel: VBoxContainer = $Root/LandingPanel
+@onready var _landing_alt: Label = $Root/LandingPanel/LandingAlt
+@onready var _landing_vspd: Label = $Root/LandingPanel/LandingVspd
+@onready var _landing_hspd: Label = $Root/LandingPanel/LandingHspd
+@onready var _landed_label: Label = $Root/LandedLabel
+@onready var _latch_label: Label = $Root/LatchLabel
 
 ## Modulates for the approach readout: a line flips to the settled tint when its
 ## value is inside capture tolerance. Calm per tone — no red anywhere.
@@ -96,6 +102,8 @@ func _process(_delta: float) -> void:
 	_update_reference_readout()
 	_update_autopilot_readout()
 	_update_docking_readout()
+	_update_landing_readout(active)
+	_update_latch_readout()
 
 	if GameState.input_mode == GameState.InputMode.EVA:
 		_update_eva_readouts()
@@ -179,6 +187,66 @@ func _update_docking_readout() -> void:
 		if _docking.approach_axis_error_deg <= port.capture_angle_max_deg
 		else DOCK_LINE_DIM
 	)
+
+
+## Surface panel (LD5): the numbers that make a landing flyable — radial
+## altitude, descent rate, and lateral drift over the ground. Shown for
+## whichever craft the player is, whenever inside a gravity shell.
+func _update_landing_readout(active: RigidBody3D) -> void:
+	if _system == null or active == null:
+		return
+	if GameState.landed:
+		_landing_panel.visible = false
+		_landed_label.visible = true
+		var landing := _ship.get_node_or_null("LandingComputer") as LandingComputer
+		var body_name: String = ""
+		if landing and landing.landed_body:
+			body_name = landing.landed_body.nav_display_name()
+		_landed_label.text = "LANDED — %s   (hold SPACE to lift off)" % body_name
+		return
+	_landed_label.visible = false
+	var body := _system.landable_body_at(OriginShift.to_true(active.global_position))
+	_landing_panel.visible = body != null
+	if body == null:
+		return
+	var up: Vector3 = (active.global_position - body.global_position).normalized()
+	var alt: float = (active.global_position - body.global_position).length() - body.def.radius
+	var v_rel: Vector3 = active.linear_velocity \
+		- LandingComputer.surface_point_velocity(body, active.global_position)
+	var vspd: float = v_rel.dot(up)
+	_landing_alt.text = "ALT   %6.0f m" % alt
+	_landing_vspd.text = "VSPD  %+6.1f m/s" % vspd
+	_landing_hspd.text = "HSPD  %6.1f m/s" % (v_rel - up * vspd).length()
+	_landing_vspd.modulate = DOCK_LINE_OK if absf(vspd) < 2.0 else DOCK_LINE_DIM
+
+
+## Clamp state (LD2): latch-ready prompt and the latched reminder, for the
+## ship's magnetic clamps and the suit's boot clamps alike.
+func _update_latch_readout() -> void:
+	if GameState.input_mode == GameState.InputMode.EVA and _character:
+		if _character.get("clamped_rock") != null:
+			_latch_label.text = "CLAMPED — G or a hard shove releases"
+			_latch_label.visible = true
+		elif _character.get("clamped_body") != null:
+			_latch_label.text = "GROUNDED — hold SPACE to release"
+			_latch_label.visible = true
+		else:
+			_latch_label.visible = false
+		return
+	var latch: LatchComputer = null
+	if _ship:
+		latch = _ship.get_node_or_null("LatchComputer") as LatchComputer
+	if latch == null:
+		_latch_label.visible = false
+		return
+	if latch.latched_rock != null:
+		_latch_label.text = "LATCHED — G releases"
+		_latch_label.visible = true
+	elif latch.ready_rock != null:
+		_latch_label.text = "G — Latch"
+		_latch_label.visible = true
+	else:
+		_latch_label.visible = false
 
 
 func _update_interact_prompt_ship() -> void:
