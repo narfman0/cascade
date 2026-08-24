@@ -124,7 +124,15 @@ func _moon_shot() -> void:
 			suit.get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, suit.global_transform)
 		await get_tree().physics_frame
 	suit.call("enter_walk_on", moon)
-	await _settle(30)
+	await _wait_grounded(suit)
+	# 6b. Mid-run first (Track AN): W held, catch the stride.
+	Input.action_press("thrust_forward")
+	for i in 70:
+		await get_tree().physics_frame
+	await _shot("19_moon_run")
+	Input.action_release("thrust_forward")
+	for i in 30:
+		await get_tree().physics_frame
 	Input.action_press("thrust_up")
 	for i in 8:
 		await get_tree().physics_frame
@@ -232,7 +240,8 @@ func _suit_groundside_shot(body: CelestialBody, label: String) -> void:
 	# terrain, and the staged facing seeds the walk's forward.
 	suit.call("enter_walk_on", body)
 	print("  staged: sep %.1f m (want ~15)" % (suit.global_position - _ship.global_position).length())
-	await _settle(50)
+	await _wait_grounded(suit)
+	await _settle(30)
 	await _shot(label)
 	GameState.input_mode = GameState.InputMode.SHIP_FLIGHT
 	suit.call("stow")
@@ -358,6 +367,14 @@ func _descend(body: CelestialBody, dir: Vector3) -> bool:
 		_ship.angular_velocity = Vector3.ZERO
 		await get_tree().physics_frame
 	return GameState.landed
+
+
+## Lunar gravity settles slowly — never shoot a "standing" frame while the
+## walk sim still says airborne (the fall clip reads as T-pose at distance).
+func _wait_grounded(suit: RigidBody3D) -> void:
+	var deadline: int = Time.get_ticks_msec() + 30000
+	while bool(suit.get("_walk_airborne")) and Time.get_ticks_msec() < deadline:
+		await get_tree().physics_frame
 
 
 func _settle(frames: int) -> void:

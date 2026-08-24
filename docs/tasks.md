@@ -537,7 +537,7 @@ surface's LOCAL frame (fictitious forces ~0.03 m/s² — ignored on purpose).
 - [ ] Polish later: walk/run animations (the Synty rig ships one take),
   camera pitch on foot, footstep audio hooks.
 
-## Track AN — Suit animation: walk, run, jump, land (QUEUED 2026-08-24, owner-requested)
+## Track AN — Suit animation: walk, run, jump, land (BUILT 2026-08-24)
 
 The suit T-poses through the whole LD6 walk because its cook ships exactly one
 take. The asset server has the fix: **ANIMATION_Base_Locomotion_SourceFiles_v3**
@@ -546,25 +546,38 @@ BOTH Synty rig generations — and crucially a `Animations/Polygon/...` tree for
 the classic Polygon rig the scifi-space EVA suit is built on, plus
 `Character/PolygonSyntyCharacter.glb` as the reference skeleton.
 
-- [ ] Fetch the pack (Polygon Masculine folders + reference character). New
-  skinned cooks flow through the patcher — the skins guard (docs/assets.md §3)
-  must leave their root scale alone; verify on first import.
-- [ ] Step 0, before any wiring: confirm bone-name compatibility between
-  `SK_Chr_BR_EVA_Suit_01` and the pack's Polygon-rig clips. If they diverge,
-  retarget in-engine via SkeletonProfile/BoneMap — do NOT hand-edit clips.
-- [ ] AnimationTree on the suit, driven by the walk state the controller
-  already exposes: Idle_Standing ↔ Walk ↔ Run blended by local speed
-  (run_speed is 4 m/s — tune playback scale so feet do not slide);
-  Jump_Idle/Jump_Walking on lift; InAir_FallShort while airborne;
-  Land_IdleSoft/Medium/Hard picked by touchdown speed. Use the IN-PLACE
-  variants everywhere — the walk simulation owns displacement, root motion
-  would fight it (the pack ships both; the `RootMotion` suffixed files are
-  the wrong ones for us).
-- [ ] Free-EVA pose keeps the existing take for now; a drifting idle is
-  stretch.
-- [ ] Gates: headless assertions that the tree's current state tracks a
-  scripted idle→run→jump→fall→land sequence; refreshed moon-jump and a new
-  ground-run screenshot as visual evidence.
+Built as an OFFLINE RETARGET BAKE, not an in-engine AnimationTree:
+`tools/bake_eva_anims.gd` (headless -s) retargets eight in-place clips
+(idle/walk/run/jump/fall/land×3) onto the suit rig and saves
+`assets/anims/eva_locomotion.res`; `scripts/eva_animator.gd` mounts it on the
+suit's own player and maps the walk state to clips (idle↔walk↔run by speed
+with playback scaling, jump→fall by radial velocity, landing weight by
+impact speed). Rebake command in the tool header; rerun it if clips change.
+
+**What the build actually taught (all verified, all in the tool's header):**
+- The two Synty generations share a body plan but NOT rest rotations — a
+  name-swap retarget explodes the pose. World-space per-bone orientation
+  deltas transfer cleanly... against the right rest:
+- The pack's CLIP rigs rest in a deep A-POSE (arm 52° down); the suit rests
+  in T-pose. Deltas vs the clip rest pinned the arms at T forever (legs
+  animated, arms frozen — the tell). The pack ships
+  `Character/PolygonSyntyCharacter.glb` in T-pose precisely for this:
+  rotation deltas calibrate against the REFERENCE rests, position deltas
+  against the clip rig (right bob amplitude), scaled by hip-height ratio.
+- Two headless-Godot traps for the standing list: `seek(update=true)` (and
+  even `play()`+seek) never applies a pose in a frameless `-s` run — sample
+  tracks and set bone poses BY HAND; and `get_bone_global_pose` reads a
+  cache that never refreshes there — compose globals from local poses
+  yourself.
+- [x] Gates: `tests/anim_test.gd` (15 checks) — library shape, keys actually
+  animate (max-swing probe at quarter phase; half phase of a run cycle is
+  left/right symmetric and probes as zero), bones leave rest AT RUNTIME
+  (clip-on-player is not tracks-on-bones), full idle→run→jump→fall→land→idle
+  state tracking on the Moon.
+- [x] Evidence: 15_landed_moon (natural standing idle beside the hull),
+  19_moon_run (mid-stride), 16_moon_jump.
+- [ ] Stretch, unbuilt: zero-g drifting idle for free EVA; EVA suit thruster
+  puffs (from Track FX); Walk_ToIdle/Idle_ToRun transition clips.
 
 ## Track FX — Ship engine light and RCS puffs (BUILT 2026-08-24)
 
