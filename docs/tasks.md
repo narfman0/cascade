@@ -537,6 +537,62 @@ surface's LOCAL frame (fictitious forces ~0.03 m/s² — ignored on purpose).
 - [ ] Polish later: walk/run animations (the Synty rig ships one take),
   camera pitch on foot, footstep audio hooks.
 
+## Track AN — Suit animation: walk, run, jump, land (QUEUED 2026-08-24, owner-requested)
+
+The suit T-poses through the whole LD6 walk because its cook ships exactly one
+take. The asset server has the fix: **ANIMATION_Base_Locomotion_SourceFiles_v3**
+(verified in the index, 721 files) carries a full in-place locomotion set for
+BOTH Synty rig generations — and crucially a `Animations/Polygon/...` tree for
+the classic Polygon rig the scifi-space EVA suit is built on, plus
+`Character/PolygonSyntyCharacter.glb` as the reference skeleton.
+
+- [ ] Fetch the pack (Polygon Masculine folders + reference character). New
+  skinned cooks flow through the patcher — the skins guard (docs/assets.md §3)
+  must leave their root scale alone; verify on first import.
+- [ ] Step 0, before any wiring: confirm bone-name compatibility between
+  `SK_Chr_BR_EVA_Suit_01` and the pack's Polygon-rig clips. If they diverge,
+  retarget in-engine via SkeletonProfile/BoneMap — do NOT hand-edit clips.
+- [ ] AnimationTree on the suit, driven by the walk state the controller
+  already exposes: Idle_Standing ↔ Walk ↔ Run blended by local speed
+  (run_speed is 4 m/s — tune playback scale so feet do not slide);
+  Jump_Idle/Jump_Walking on lift; InAir_FallShort while airborne;
+  Land_IdleSoft/Medium/Hard picked by touchdown speed. Use the IN-PLACE
+  variants everywhere — the walk simulation owns displacement, root motion
+  would fight it (the pack ships both; the `RootMotion` suffixed files are
+  the wrong ones for us).
+- [ ] Free-EVA pose keeps the existing take for now; a drifting idle is
+  stretch.
+- [ ] Gates: headless assertions that the tree's current state tracks a
+  scripted idle→run→jump→fall→land sequence; refreshed moon-jump and a new
+  ground-run screenshot as visual evidence.
+
+## Track FX — Ship engine light and RCS puffs (QUEUED 2026-08-24, owner-requested)
+
+"When we engage the engine we should see lights; 6DOF should fire particles
+along appropriate axes." Nothing about the ship visibly reacts to thrust
+today. All in-engine work — no new assets required (scifi-space has
+SM_Veh_Part_Engine_* meshes if a nozzle prop helps the stern read).
+
+- [ ] Expose the commanded per-axis thrust and torque from ship_controller
+  (one `fx_thrust_local: Vector3` + `fx_torque_local: Vector3`, written where
+  forces are applied — including the flight-assist counter-burns, which are
+  real thruster firings the player should see). The autopilot's cruise drive
+  reports its own thrust direction the same way.
+- [ ] Main engine: emissive glow + OmniLight + a GPUParticles3D plume at the
+  stern, intensity scaled by the commanded main burn (forward z, and the
+  belly jets' vertical main budget inside gravity shells — those should
+  glow too, they are the landing engine).
+- [ ] RCS: small GPUParticles3D puff emitters at the existing thruster
+  markers in ship.tscn (rescaled 1.8x with the hull), each firing OPPOSITE
+  the thrust it produces — translation puffs on the away side, torque puffs
+  in opposed pairs. White-blue, short-lived, quiet.
+- [ ] EVA suit thruster puffs: stretch, same pattern at MMU scale.
+- [ ] AudioManager hook comments alongside each emitter (no audio assets yet
+  — the M2 convention).
+- [ ] Gates: headless assertions that emitter activity tracks commanded
+  thrust per axis (burn forward → plume on, +X RCS quiet; yaw → the right
+  opposed pair). Screenshot: a main-engine burn against the dark side.
+
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 
 Audit findings, then the plan. What is already RIGHT and must not regress:
