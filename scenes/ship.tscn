@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=3 uid="uid://b7x2n4kq8ma1p"]
+[gd_scene load_steps=22 format=3 uid="uid://b7x2n4kq8ma1p"]
 
 [ext_resource type="Script" path="res://scripts/ship_controller.gd" id="1_ship"]
 [ext_resource type="Script" path="res://scripts/docking_computer.gd" id="7_dock"]
@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://scripts/ship_effects.gd" id="10_fx"]
 [ext_resource type="Script" path="res://scripts/eva_animator.gd" id="11_anim"]
 [ext_resource type="Script" path="res://scripts/hazard_monitor.gd" id="12_hz"]
+[ext_resource type="Script" path="res://scripts/autoland_computer.gd" id="13_al"]
 [ext_resource type="Script" path="res://scripts/camera_rig.gd" id="2_cam"]
 [ext_resource type="Script" path="res://scripts/eva_controller.gd" id="3_eva"]
 [ext_resource type="Script" path="res://scripts/autopilot.gd" id="4_auto"]
@@ -85,6 +86,9 @@ script = ExtResource("9_land")
 
 [node name="HazardMonitor" type="Node" parent="."]
 script = ExtResource("12_hz")
+
+[node name="AutolandComputer" type="Node" parent="."]
+script = ExtResource("13_al")
 
 [node name="ShipEffects" type="Node3D" parent="."]
 script = ExtResource("10_fx")

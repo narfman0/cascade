@@ -217,6 +217,13 @@ func _update_landing_readout(active: RigidBody3D) -> void:
 	_landing_panel.visible = body != null
 	if body == null:
 		return
+	var autoland := _ship.get_node_or_null("AutolandComputer") as AutolandComputer
+	if autoland and autoland.active:
+		_landed_label.text = autoland.status_line()
+		_landed_label.visible = true
+	elif not GameState.landed and autoland and autoland.can_engage() 			and GameState.input_mode == GameState.InputMode.SHIP_FLIGHT:
+		_landed_label.text = "L — Autoland"
+		_landed_label.visible = true
 	var up: Vector3 = (active.global_position - body.global_position).normalized()
 	var alt: float = (active.global_position - body.global_position).length() - body.def.radius
 	var v_rel: Vector3 = active.linear_velocity \

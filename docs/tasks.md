@@ -639,7 +639,7 @@ planet demands. Design decisions to build against:
   RCS alone (belly jets never promoted); EVA jump ballistics under micro-g;
   co-rotation on the tumbling one; all existing suites green.
 
-## Track AL — Autoland (QUEUED 2026-08-24, owner-requested)
+## Track AL — Autoland (BUILT 2026-08-24)
 
 One key from inside a gravity shell: the computer flies the descent the
 landing gates already prove out manually — the docking computer's philosophy
@@ -664,10 +664,20 @@ landing gates already prove out manually — the docking computer's philosophy
   what happens next.
 - HUD: AUTOLAND armed/active line in the SURFACE panel; the M2 AudioManager
   hook comments at engage/touchdown.
-- Gates: engage at 1.4 R over Earth and the Moon → landed state captured
-  with touchdown speed under limit and upright; abort mid-descent returns a
-  live controllable ship; refuses outside a shell; works on a MinorBody once
-  LD7 lands.
+- [x] BUILT as specced: `AutolandComputer` on the ship, L to engage/abort,
+  jurisdiction exactly the landable shell (`can_engage` via
+  `landable_body_at`; the autopilot hands off at 1.5 R). Flies the REAL hull:
+  upright torque against local up, lateral drift nulled against the surface
+  point, braked profile v=√(2·a_brake·alt)·0.7 flaring to 1.4 m/s under the
+  2 m/s capture limit, LD4's own capture fires — no second landing state.
+  Publishes fx signals, so the belly jets visibly carry the descent. Abort
+  on any stick input / fuel-out / leaving the shell; HZ owns the fall after
+  a fuel-out. HUD: AUTOLAND line + "L — Autoland" prompt in the shell.
+- [x] Gates: `tests/autoland_test.gd` (19 checks) — Moon and Earth descents
+  land captured, under-limit (1.30 / 1.37 m/s), upright (≤22.5°); stick
+  abort returns a live ship with FA back; refuses outside a shell. Evidence:
+  23_autoland (belly plume, ALT 105 m, VSPD −13.2 on profile, HSPD 0.1).
+- [ ] Works on a MinorBody once LD7 lands (same query, should be free).
 
 ## Track HZ — Gravity-well hazard: warning, failure, restart (BUILT 2026-08-24)
 
