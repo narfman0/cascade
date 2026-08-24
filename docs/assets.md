@@ -131,6 +131,15 @@ Plus a +90° X rotation (Synty authors Z-up; glTF is Y-up), so **world extents
 are `(rawX, rawZ, rawY) × root scale`**. Whether the 0.01 is correct depends on
 the cook generation:
 
+**Skinned cooks are the exception to the exception (2026-08-23):** a cook
+with `skins` (the rigged characters) must KEEP its 0.01 root even though its
+mesh vertices are metres — the skeleton joints and inverse bind matrices are
+centimetres, glTF skinning runs in the skeleton's space, and the root scale is
+what brings the skinned result back to metres. Stripping it explodes the limbs
+~100x in render while every rest-space AABB still reads 1.73 m (a skinned
+mesh's `get_aabb()` cannot see skinning — do not trust it). The patcher now
+refuses to touch any glTF with `skins`.
+
 | Family | Vertices | The 0.01 is | Result if left alone |
 |---|---|---|---|
 | `POLYGON_*` static `SM_*` | centimetres | correct | fine |

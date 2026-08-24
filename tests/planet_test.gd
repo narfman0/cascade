@@ -400,7 +400,7 @@ func _test_tile_streaming() -> void:
 			+ world_dir * (earth.def.radius + 2500.0)
 		_ship.global_position = where
 		await get_tree().physics_frame
-		if cam == null or cam.global_position.distance_to(where) < 20.0:
+		if cam == null or cam.global_position.distance_to(where) < 30.0:
 			break
 
 	deadline = Time.get_ticks_msec() + 20000
@@ -440,7 +440,7 @@ func _test_tile_streaming() -> void:
 			+ world_dir * (earth.def.radius + 2500.0)
 		_ship.global_position = where
 		await get_tree().physics_frame
-		if cam == null or cam.global_position.distance_to(where) < 20.0:
+		if cam == null or cam.global_position.distance_to(where) < 30.0:
 			break
 	deadline = Time.get_ticks_msec() + 20000
 	while surface.is_tile_resident("2:5:1") and Time.get_ticks_msec() < deadline:
@@ -814,7 +814,7 @@ func _settle_at(body: CelestialBody, distance: float) -> Dictionary:
 		var where: Vector3 = OriginShift.to_render(body.true_pos) + dir * distance
 		_ship.global_position = where
 		await get_tree().physics_frame
-		if cam == null or cam.global_position.distance_to(where) < 20.0:
+		if cam == null or cam.global_position.distance_to(where) < 30.0:
 			break
 	return await _settle_surface(surface)
 

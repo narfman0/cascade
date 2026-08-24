@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://tests/capture_suit_scale.gd" id="1_ss"]
+
+[node name="CaptureSuitScale" type="Node"]
+script = ExtResource("1_ss")

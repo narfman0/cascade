@@ -130,7 +130,7 @@ func _hold_pose(resolve: Callable) -> void:
 		await get_tree().physics_frame
 		if cam == null:
 			break
-		if cam.global_position.distance_to(_ship.to_global(Vector3(0.0, 3.0, 12.0))) < 1.0:
+		if cam.global_position.distance_to(_ship.to_global(_ship.get_node("CameraRig").third_person_offset)) < 1.0:
 			break
 	for _i in 20:
 		await get_tree().process_frame

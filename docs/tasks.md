@@ -635,11 +635,24 @@ drains on thrust AND torque and cuts both at empty (spec-intended dead-stick).
 Weak spots if EVA gets a feel pass later: keys are binary full-thrust, no
 free-look, empty-tank tumble is unforgiving.
 
-- [ ] **Owner call**: fix the scale mismatch at the ship, not the suit —
-  scale the hull assembly ~1.75-2x (13-14.5 m long, human ~1/8 of length like
-  a real tug; mass/thrust already fit a ship that size), rescaling collision,
-  cargo bay, exit point and docking collar together. Cheaper cosmetic
-  alternative: pull the EVA camera back to (0, 1.6, 6). Or both.
+- [x] **Ship rescaled 1.8x** (owner call, 2026-08-23): hull instance, box
+  collision, cargo bay, thruster markers, nav lights, exit point and both
+  camera offsets, all together (hull now ~13.0 m long; mass/thrust already
+  fit). Harnesses read the rig offset instead of hardcoding it.
+- [x] **CORRECTION to the audit above — the suit WAS broken, differently.**
+  The rest-pose measurements were true but blind: `get_aabb()` on a skinned
+  mesh reports REST space and cannot see skinning. In the render, the suit's
+  limbs exploded ~100x — `patch_gltf_materials` stripped the 0.01 root scale
+  from the character cook (correct for its metre vertices) but the cook keeps
+  its skeleton joints AND inverse bind matrices in centimetres, and glTF
+  skinning runs in the skeleton's space: the root scale is what brings the
+  skinned result back to metres. That was the owner's original "giant suit".
+  Fixed: the patcher never strips the root from a cook with `skins` (rule
+  documented in the patcher docstring), the local asset is restored, and the
+  suit renders a posed 1.73 m figure beside the 13 m hull.
+- [x] EVA handoff verified as requested: `request_exit` already sets the suit
+  to the ship's velocity including the hatch's rotational term (zero relative
+  speed at exit), full 6DOF thrust retained, assist on by default.
 
 ### OR2 — Dramatic lighting change tied to MOVEMENT — FIXED 2026-08-23
 **Still reproduces.** The owner playtested the current build and re-reported

@@ -177,7 +177,19 @@ def _vertices_are_metres(path: pathlib.Path, g: dict) -> bool:
 def _fix_stray_unit_scale(path: pathlib.Path, g: dict) -> bool:
     """Strip the 0.01 root-node scale when the vertices are already in
     metres (docstring #1). Only root nodes named by a scene are touched, so
-    intentional child scaling survives."""
+    intentional child scaling survives.
+
+    NEVER strip it from a SKINNED cook. The character cooks keep their
+    skeleton joints and inverse bind matrices in centimetres even when the
+    mesh vertices are metres, and glTF skinning runs in the skeleton's space
+    — the 0.01 root is what brings the skinned result back to metres.
+    Stripping it explodes the limbs ~100x the moment the skeleton drives the
+    mesh (the giant-EVA-suit bug), while every REST-space check still reads
+    1.73 m, because a skinned mesh's AABB cannot see skinning. Verified
+    empirically on SK_Chr_BR_EVA_Suit_01: root restored -> correct 1.73 m
+    posed figure; root stripped -> exploded."""
+    if g.get("skins"):
+        return False
     if not _vertices_are_metres(path, g):
         return False
     changed = False
