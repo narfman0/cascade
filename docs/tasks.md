@@ -478,11 +478,40 @@ handoff. Suit hovers on the Moon, not on Earth — on purpose. Gas giants: no.
    left resting on per-frame-teleporting colliders is eventually thrown by
    the solver.
 
-Suites: `anchor_test` (16 checks) and `landing_test` (23 checks) — both green,
-all six prior suites green. Two harness traps for the standing list:
-GDScript lambdas capture locals BY VALUE (signal-fired flags need an array
-cell), and a held teleport goes stale when an origin shift fires mid-hold —
-pose targets must be Callables re-evaluated per frame, never fixed vectors.
+**Owner follow-up (2026-08-24): "if we LOD transitioned after we passed where
+the surface was, that's way too late."** Correct — and fixed at the root:
+4. **Transition-earlier pin.** The skim ship's footprint now pins the quadtree
+   to max depth (the detail-site pinning mechanism, reused): terrain under a
+   hull converges to final geometry when skim engages at 500 m, splits finish
+   on approach, and merges wait until the hull leaves. The collider swap
+   guard remains as a backstop only. Gated: ground height under the final
+   approach moves < 0.021 m below 60 m altitude (`landing_test`).
+The convincing-screenshot hunt then flushed out three more real bugs:
+5. **Reparent killed EVA.** `ship_controller._exit_tree` freed the stowed
+   suit — and docking/landing captures REPARENT the hull, which passes
+   through `_exit_tree`. EVA died after any capture. Cleanup moved to
+   NOTIFICATION_PREDELETE; gated in `landing_test`.
+6. **EVA exit under a rail parent.** `request_exit` parented the suit under
+   `_ship.get_parent()` — the PORT while docked, the PLANET SURFACE while
+   landed; a live body there enters the write-back fight (measured 193 km of
+   drift in three frames). The suit now enters the world container captured
+   at bootstrap; gated in `landing_test`.
+7. **Hatch clips the relief when landed.** Exit position lifts 2 m along
+   local up on the ground, else the solver ejects the suit at ~255 m/s.
+
+Suites: `anchor_test` (16 checks) and `landing_test` (26 checks) — both green,
+all six prior suites green. Harness traps for the standing list:
+- GDScript lambdas capture locals BY VALUE (signal-fired flags need an array cell).
+- A held teleport goes stale when an origin shift fires mid-hold — pose
+  targets must be Callables re-evaluated per frame, never fixed vectors.
+- A stowed body re-enters the physics space holding its stale pre-stow SERVER
+  transform and node writes converge over many steps — hard-sync with
+  `PhysicsServer3D.body_set_state(BODY_STATE_TRANSFORM)` before trusting a pose.
+- After ANY `SimClock.sim_time` jump, re-centre the origin from analytic TRUE
+  space (body position + spin-rotated local offset), NEVER from
+  `to_true(node.global_position)`: the jump proxies the body, drags its
+  children to the 40 km proxy shell, and to_true() of that locks the garbage
+  in (the `_frame_site` trap, third appearance).
 
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 

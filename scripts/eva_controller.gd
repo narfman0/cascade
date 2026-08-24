@@ -40,6 +40,12 @@ var _ship: RigidBody3D
 var _cargo_bay: Area3D
 var _exit_point: Marker3D
 var _in_cargo_bay: bool = false
+## The free-flight world container, captured at bootstrap. request_exit must
+## NEVER use the ship's current parent: a docked ship hangs under its port and
+## a landed one under the planet surface — both rail-driven, and a live body
+## added there enters the write-back fight (measured: 193 km of suit drift in
+## three frames when exiting on the ground).
+var _world_container: Node = null
 
 signal boarded
 signal exited
@@ -80,6 +86,7 @@ func _ready() -> void:
 	if _ship == null and get_parent() is RigidBody3D:
 		_ship = get_parent()
 	if _ship:
+		_world_container = _ship.get_parent()
 		_cargo_bay = _ship.get_node_or_null("CargoBay") as Area3D
 		_exit_point = _ship.get_node_or_null("ExitPoint") as Marker3D
 		if _cargo_bay:
@@ -230,11 +237,23 @@ func is_stowed() -> bool:
 func request_exit() -> void:
 	if _ship == null or _exit_point == null:
 		return
-	# Place the suit into the world at the hatch, as an independent body.
-	var world := _ship.get_parent()
+	# Place the suit into the WORLD at the hatch — see _world_container: the
+	# ship's own parent is a rail-driven node while docked or landed.
+	var world := _world_container
+	if world == null or not is_instance_valid(world):
+		world = _ship.get_parent()
 	if world == null:
 		return
 	var exit_xform: Transform3D = _exit_point.global_transform
+	# Landed hulls sit belly-on-terrain: a hatch position can clip the relief,
+	# and a live body spawned inside the ground gets solver-ejected at
+	# hundreds of m/s (measured 255 m/s). Lift the exit along local up.
+	if GameState.landed:
+		var landing := _ship.get_node_or_null("LandingComputer")
+		if landing != null and landing.get("landed_body") != null:
+			var body_up: Vector3 = (_ship.global_position
+				- (landing.get("landed_body") as Node3D).global_position).normalized()
+			exit_xform.origin += body_up * 2.0
 	var ship_lin: Vector3 = _ship.linear_velocity
 	var ship_ang: Vector3 = _ship.angular_velocity
 	var r: Vector3 = exit_xform.origin - _ship.global_position

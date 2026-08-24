@@ -311,7 +311,17 @@ func _patch_error(node: QuadNode, cam_pos: Vector3, amp_m: float) -> float:
 
 func _update_node(node: QuadNode, cam_pos: Vector3, amp_m: float) -> void:
 	var err := _patch_error(node, cam_pos, amp_m)
-	var pinned := node.depth < site_min_depth and _overlaps_resident_site(node)
+	# Two pins: resident sites (their insets need the detail), and the skim
+	# ship's footprint (LD4). The ship pin is the transition-EARLIER rule: the
+	# terrain a hull might touch must be converged at max depth before the
+	# hull enters the relief band — splits complete on approach out at skim
+	# range, and merges wait until the hull leaves. Without it, the camera
+	# receding on climb-out merges patches right under a hull five metres off
+	# the deck, and the error-metric-driven splits chase the camera down
+	# during descent. The collider swap guard in _refresh_colliders stays as
+	# a backstop, but with this pin nothing should ever swap beneath a hull.
+	var pinned := (node.depth < site_min_depth and _overlaps_resident_site(node)) \
+		or (node.depth < max_depth and _overlaps_skim_ship(node))
 	if node.children.is_empty():
 		_update_morph(node, err, pinned)
 		if (pinned or err > subdivide_threshold) and node.depth < max_depth:
@@ -340,6 +350,19 @@ func _update_morph(node: QuadNode, err: float, pinned: bool) -> void:
 
 ## Does this patch cover any part of a streamed-in site? Compared as angles on
 ## the unit sphere, so it is independent of spin and of the proxy scale.
+## The spherical cap the skim ship's footprint pins to max depth. 150 m of
+## ground radius keeps the hull well clear of any pinned/unpinned boundary.
+func _overlaps_skim_ship(node: QuadNode) -> bool:
+	if not skim_active or _skim_ship == null or not is_instance_valid(_skim_ship):
+		return false
+	var local: Vector3 = to_local(_skim_ship.global_position)
+	if local.length_squared() < 1e-6:
+		return false
+	var dir: Vector3 = node.center.normalized()
+	var reach: float = PlanetPatchMesh.span_m(radius, node.depth) * 0.75 / radius
+	return dir.angle_to(local.normalized()) < 150.0 / radius + reach
+
+
 func _overlaps_resident_site(node: QuadNode) -> bool:
 	if _sites.is_empty():
 		return false

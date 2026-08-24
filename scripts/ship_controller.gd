@@ -207,11 +207,17 @@ func refill_fuel() -> void:
 	fuel_changed.emit(fuel_remaining, fuel_capacity)
 
 
-func _exit_tree() -> void:
-	# A stowed suit has no parent, so nothing else will free it.
-	if character and (character as Node).get_parent() == null:
-		(character as Node).queue_free()
-		character = null
+func _notification(what: int) -> void:
+	# A stowed suit has no parent, so nothing else will free it. This must be
+	# PREDELETE, not _exit_tree: docking and landing REPARENT the hull (port /
+	# planet surface), and a reparent passes through _exit_tree — which was
+	# silently destroying the stowed suit on every capture, killing EVA for
+	# the rest of the session. Found when the landed-groundside screenshot
+	# asked the freshly landed ship for its character and got null.
+	if what == NOTIFICATION_PREDELETE:
+		if character and is_instance_valid(character) and (character as Node).get_parent() == null:
+			(character as Node).free()
+			character = null
 
 
 ## Take the EVA suit out of the tree and hold it. Called once at bootstrap; the

@@ -166,6 +166,12 @@ func _test_descent_and_landing() -> void:
 		if surface.skim_active and (cam == null or cam.global_position.distance_to(where) < 30.0):
 			break
 	_check(surface.skim_active, "skim colliders resident for descent")
+	# Let the ship-footprint pin converge to max depth before descending —
+	# splits are worker-built, and the whole point is that they finish HERE,
+	# not under the hull.
+	for i in 240:
+		surface.force_evaluate()
+		await get_tree().process_frame
 	_ship.freeze = false
 	GameState.flight_assist_enabled = false
 	# Scripted descent: hold 1.5 m/s straight down relative to the ground until
@@ -173,6 +179,11 @@ func _test_descent_and_landing() -> void:
 	# GDScript lambdas capture locals by value; mutate through an array cell.
 	var landed_fired: Array = [false]
 	_landing.landed.connect(func(_n: String) -> void: landed_fired[0] = true)
+	# Transition-earlier gate: once below 60 m the ground under the hull must
+	# never move again — no LOD swap may change the surface beneath a landing.
+	var ground_r_min: float = INF
+	var ground_r_max: float = -INF
+	var ray_tick: int = 0
 	deadline = Time.get_ticks_msec() + 150000
 	while not GameState.landed and Time.get_ticks_msec() < deadline:
 		# Down is re-derived every frame: the planet turns and the ship rides it in.
@@ -181,12 +192,44 @@ func _test_descent_and_landing() -> void:
 		_ship.linear_velocity = ground_v + down * 1.5
 		_ship.angular_velocity = Vector3.ZERO
 		await get_tree().physics_frame
+		ray_tick += 1
+		var centre: Vector3 = OriginShift.to_render(_earth.true_pos)
+		var alt_now: float = (_ship.global_position - centre).length() - _earth.def.radius
+		if alt_now < 60.0 and ray_tick % 10 == 0:
+			var q := PhysicsRayQueryParameters3D.create(
+				_ship.global_position, _ship.global_position + down * 200.0)
+			q.exclude = [_ship.get_rid()]
+			var hit: Dictionary = _ship.get_world_3d().direct_space_state.intersect_ray(q)
+			if not hit.is_empty():
+				var r_hit: float = (hit.position - centre).length()
+				ground_r_min = minf(ground_r_min, r_hit)
+				ground_r_max = maxf(ground_r_max, r_hit)
 	_check(GameState.landed and landed_fired[0], "touchdown captures the landed state")
+	var ground_spread: float = ground_r_max - ground_r_min
+	_check(ground_r_min < INF and ground_spread < 0.3,
+		"ground never moves under the final approach",
+		"height spread %.3f m below 60 m altitude" % ground_spread)
 	_check(_landing.landed_body == _earth, "landed on Earth")
 	var parent_ok: bool = _ship.get_parent() == _earth.planet_surface()
 	_check(parent_ok, "landed hull parented under the spinning surface")
 	_check(not _ship.is_in_group(OriginShift.SHIFTABLE_GROUP),
 		"landed hull left the shiftable group")
+	# The capture reparents the hull, and a reparent passes through
+	# _exit_tree — which used to free the stowed suit (EVA dead after any
+	# docking or landing). Guard the regression.
+	var suit: RigidBody3D = _ship.get("character")
+	_check(suit != null and is_instance_valid(suit),
+		"stowed suit survives the landing reparent")
+	# And EVA exit on the ground must enter the WORLD: the landed ship's own
+	# parent is the rail-driven surface, and a live body added there drifts
+	# kilometres in frames (the write-back fight).
+	if suit != null:
+		suit.call("request_exit")
+		suit.freeze = true
+		_check(suit.get_parent() != null and suit.get_parent() != _earth.planet_surface(),
+			"EVA exit while landed enters the world, not the rail-driven surface")
+		GameState.input_mode = GameState.InputMode.SHIP_FLIGHT
+		suit.call("stow")
 
 
 ## Warp time forward: the ship's pose in the surface frame must hold exactly
