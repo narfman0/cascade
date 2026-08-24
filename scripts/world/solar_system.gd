@@ -148,11 +148,26 @@ func _aim_sun_light() -> void:
 
 	# Track SL1 + SL3: sunlight is distance-true, eclipsed by bodies, and
 	# filtered by any atmosphere the sun ray grazes on its way here.
-	var origin: Array = [OriginShift.origin_x, OriginShift.origin_y, OriginShift.origin_z]
-	sun_visibility = sun_visibility_at(origin)
-	sun_tint = sun_filter_at(origin)
+	#
+	# Evaluated at the TRACKED SHIP's true position, never at the render
+	# origin: the origin trails the ship by up to 10 km between rebases, so
+	# an origin-based eclipse held a stale answer while you flew and then
+	# re-evaluated all at once when the rebase fired — the sun winked on or
+	# off after "moving a certain amount" (OR2, attributed by probe_or2:
+	# `vis` flipped exactly on the rows where origin_x jumped, and read
+	# fully-lit with the ship deep inside Earth's shadow).
+	var eval_pos: Array = [OriginShift.origin_x, OriginShift.origin_y, OriginShift.origin_z]
+	var tracked := OriginShift.tracked
+	if tracked != null and is_instance_valid(tracked):
+		eval_pos = OriginShift.to_true(tracked.global_position)
+	sun_visibility = sun_visibility_at(eval_pos)
+	sun_tint = sun_filter_at(eval_pos)
+	var ex: float = _sun.true_pos[0] - eval_pos[0]
+	var ey: float = _sun.true_pos[1] - eval_pos[1]
+	var ez: float = _sun.true_pos[2] - eval_pos[2]
+	var d_sun: float = maxf(sqrt(ex * ex + ey * ey + ez * ez), 1.0)
 	var energy: float = clampf(
-		SUN_BASE_ENERGY * pow(EARTH_ORBIT / len, 2.0),
+		SUN_BASE_ENERGY * pow(EARTH_ORBIT / d_sun, 2.0),
 		SUN_ENERGY_FLOOR, SUN_ENERGY_CAP)
 	_sun_light.light_energy = energy * sun_visibility
 	_sun_light.light_color = Color(sun_tint.x, sun_tint.y, sun_tint.z)

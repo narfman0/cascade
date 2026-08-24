@@ -27,7 +27,7 @@ func _ready() -> void:
 
 	_report_spawn(system, ship)
 	_test_bodies(system)
-	_test_sunlight(system)
+	_test_sunlight(system, ship)
 	_test_transfers(system, ship, autopilot)
 
 	print("")
@@ -48,7 +48,7 @@ func _check(ok: bool, label: String, detail: String = "") -> void:
 
 ## --- Sunlight (Track SL1 + SL2) ------------------------------------------------
 
-func _test_sunlight(system: SolarSystem) -> void:
+func _test_sunlight(system: SolarSystem, ship: RigidBody3D) -> void:
 	print("\n== sunlight ==")
 	var sun := system.get_body(&"sun")
 	var earth := system.get_body(&"earth")
@@ -106,6 +106,31 @@ func _test_sunlight(system: SolarSystem) -> void:
 	# SL3 sanity here too: vacuum sunlight is exactly white.
 	_check(system.sun_filter_at(sunny).is_equal_approx(Vector3.ONE),
 		"vacuum sunlight is white")
+
+	# OR2 regression gate: the LIVE light must follow the TRACKED SHIP, not
+	# the render origin. Park the frozen ship in Earth's umbra WITHOUT
+	# crossing the 10 km rebase threshold — the origin stays sunlit while the
+	# ship is shadowed, and the light must side with the ship.
+	var world_umbra := OriginShift.to_render(umbra)
+	_check(world_umbra.length() < OriginShift.SHIFT_THRESHOLD_METERS,
+		"umbra probe stays inside the rebase threshold",
+		"(%.0f m)" % world_umbra.length())
+	var origin_now: Array = [
+		OriginShift.origin_x, OriginShift.origin_y, OriginShift.origin_z]
+	_check(system.sun_visibility_at(origin_now) > 0.9,
+		"...while the origin itself is sunlit")
+	ship.freeze = true
+	var old_pos: Vector3 = ship.global_position
+	ship.global_position = world_umbra
+	await get_tree().physics_frame
+	await get_tree().process_frame
+	_check(system.sun_visibility < 0.05,
+		"the live eclipse follows the ship into the umbra",
+		"(vis %.3f)" % system.sun_visibility)
+	ship.global_position = old_pos
+	await get_tree().physics_frame
+	await get_tree().process_frame
+	ship.freeze = false
 
 
 ## --- Spawn -------------------------------------------------------------------

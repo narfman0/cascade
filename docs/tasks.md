@@ -596,7 +596,7 @@ Not touched by anything upstream. Stands as raised.
   the flag on, or exercise the controller below the gate. A suite that starts
   failing because the feature is switched off is a broken gate, not a pass.
 
-### OR2 — Dramatic lighting change tied to MOVEMENT (next up, owner-confirmed 2026-08-23)
+### OR2 — Dramatic lighting change tied to MOVEMENT — FIXED 2026-08-23
 **Still reproduces.** The owner playtested the current build and re-reported
 with sharper symptoms: it is not (only) a startup pop — *moving a certain
 amount* triggers a dramatic lighting change, "like shadows turn off or don't
@@ -633,8 +633,27 @@ threshold crossing) against a mean-frame-luminance probe; the jump will
 timestamp itself against exactly one of them. Fix the mechanism, not the
 constant, then re-run all six suites and recapture the SL screenshots.
 
-- [ ] Instrument the six thresholds + luminance probe, reproduce, attribute.
-- [ ] Fix the attributed mechanism; keep the others' logging as a debug flag.
+- [x] Instrumented and attributed with `tests/probe_or2.gd` (kept as the
+  standing instrument: three scripted sweeps logging mean frame luminance
+  against every suspect per step). The data was unambiguous: `sun_visibility`
+  flipped 1.000 -> 0.000 on exactly the rows where `origin_x` jumped — an
+  ORIGIN REBASE — and later read fully-lit with the ship deep inside Earth's
+  shadow. **Root cause: suspect #2.** The SL1 eclipse, SL3 tint and 1/d²
+  energy were all evaluated at the RENDER ORIGIN, which trails the tracked
+  ship by up to 10 km between rebases: stale lighting while flying, then a
+  single-frame re-evaluation when the rebase fired — the sun winking on/off
+  after "moving a certain amount", bloom collapsing with it, shadows dying
+  with the light. Suspects #1/#3/#4/#5 were exonerated by Sweep A (a full
+  descent through skim/tile/shadow ranges produced not one luminance jump);
+  #6 was a symptom, not a cause.
+- [x] Fix: `SolarSystem._aim_sun_light` evaluates visibility, tint and solar
+  distance at `OriginShift.tracked`'s TRUE position (origin only as a
+  fallback). Eclipse crossings now happen where the ship actually is, and
+  the on-ramp is the physical sequence — atmosphere-reddened light, then the
+  penumbra gradient, then umbra — instead of a rebase-timed snap.
+- [x] Regression gate (`travel_test`): frozen ship parked in the umbra at
+  9,874 m from the origin (inside the rebase threshold, origin still
+  sunlit) — the live light must follow the ship to sub-5% visibility.
 - [ ] If it does still happen, note what is now ruled out: **auto-exposure is not
   implemented** — SL8 (exposure adaptation) is unbuilt and pending an owner call,
   and the only exposure control in the project is the static
