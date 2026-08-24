@@ -149,6 +149,7 @@ func cancel(reason: String = "pilot override") -> void:
 
 func _release_to_physics() -> void:
 	SimClock.reset_warp()
+	_ship.set("fx_thrust_local", Vector3.ZERO)
 	# Re-centre the origin on where we ended up, then hand back exact state.
 	OriginShift.shift_to(_pos)
 	_ship.global_position = OriginShift.to_render(_pos)
@@ -297,6 +298,12 @@ func _step(dt_sim: float) -> void:
 	_pos = OriginShift.dv_add(_pos, OriginShift.dv_scaled(world_vel, dt_sim))
 
 	_consume_cruise_fuel(dv_len)
+	# FX (Track FX): the hull is pointed along the thrust vector, so the
+	# cruise burn is always a stern plume; throttle from the dv actually spent
+	# against this step's budget.
+	var throttle: float = clampf(dv_len / maxf(a * dt_sim, 1e-9), 0.0, 1.0)
+	_ship.set("fx_thrust_local", Vector3(0, 0, -throttle * float(_ship.get("thrust_main"))))
+	_ship.set("fx_torque_local", Vector3.ZERO)
 	_write_render_state(dv, dt_sim)
 	_emit_progress(distance)
 

@@ -33,6 +33,13 @@ var _assist_gain: float = 0.0
 ## the ship is near, instead of relative to the Sun.
 var system: SolarSystem = null
 
+## Commanded thrust and torque this physics tick, ship-local, in N / N·m —
+## the FX drive signal (Track FX). Written where forces are applied, so the
+## flight-assist counter-burns show up too (they are real thruster firings);
+## the autopilot writes its own cruise burn here while it owns the hull.
+var fx_thrust_local: Vector3 = Vector3.ZERO
+var fx_torque_local: Vector3 = Vector3.ZERO
+
 ## The EVA suit. Held here rather than in the tree while the player is aboard —
 ## see the note at the top of eva_controller.gd for why nesting it under this
 ## body is not an option. Never freed, so the reference stays valid.
@@ -98,6 +105,11 @@ func _physics_process(delta: float) -> void:
 		or GameState.landed
 	):
 		_mouse_delta_accum = Vector2.ZERO
+		# The autopilot owns the FX signal during a transfer; everything else
+		# hands-off means engines cold.
+		if not GameState.autopilot_active:
+			fx_thrust_local = Vector3.ZERO
+			fx_torque_local = Vector3.ZERO
 		return
 
 	# --- Local-space translation input as a per-axis command in [-1, 1] ---
@@ -146,6 +158,7 @@ func _physics_process(delta: float) -> void:
 	# --- Apply translation force in world space ---
 	if fuel_remaining <= 0.0:
 		thrust_local = Vector3.ZERO
+	fx_thrust_local = thrust_local
 	var thrust_world: Vector3 = global_basis * thrust_local
 	if thrust_world != Vector3.ZERO:
 		apply_central_force(thrust_world)
@@ -181,6 +194,7 @@ func _physics_process(delta: float) -> void:
 
 	if fuel_remaining <= 0.0:
 		torque_local = Vector3.ZERO
+	fx_torque_local = torque_local
 	var torque_world: Vector3 = global_basis * torque_local
 	if torque_world != Vector3.ZERO:
 		apply_torque(torque_world)

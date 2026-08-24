@@ -13,7 +13,7 @@ M1/M2 human-feel gate on M3 is satisfied. Track LD is BUILT (owner approved
 debris substrate already exists — `SpaceRock` fields with wake/sleep and
 latching are live in the world. Contracts hang directly off them.
 
-**Running the suites:** all six exit cleanly and fast — travel ~8 s, docking
+**Running the suites:** all exit cleanly and fast — travel ~8 s, docking
 ~7 s, eva ~8 s, station ~12 s, planet ~127 s, atmosphere ~35 s, every one exit 0. If a suite ever
 hangs after printing PASS again, suspect un-drained `WorkerThreadPool` tasks:
 Godot blocks on the pool at shutdown, so any node that spawns tasks must wait for
@@ -566,32 +566,31 @@ the classic Polygon rig the scifi-space EVA suit is built on, plus
   scripted idle→run→jump→fall→land sequence; refreshed moon-jump and a new
   ground-run screenshot as visual evidence.
 
-## Track FX — Ship engine light and RCS puffs (QUEUED 2026-08-24, owner-requested)
+## Track FX — Ship engine light and RCS puffs (BUILT 2026-08-24)
 
 "When we engage the engine we should see lights; 6DOF should fire particles
-along appropriate axes." Nothing about the ship visibly reacts to thrust
-today. All in-engine work — no new assets required (scifi-space has
-SM_Veh_Part_Engine_* meshes if a nozzle prop helps the stern read).
+along appropriate axes." Built as scoped, all in-engine:
 
-- [ ] Expose the commanded per-axis thrust and torque from ship_controller
-  (one `fx_thrust_local: Vector3` + `fx_torque_local: Vector3`, written where
-  forces are applied — including the flight-assist counter-burns, which are
-  real thruster firings the player should see). The autopilot's cruise drive
-  reports its own thrust direction the same way.
-- [ ] Main engine: emissive glow + OmniLight + a GPUParticles3D plume at the
-  stern, intensity scaled by the commanded main burn (forward z, and the
-  belly jets' vertical main budget inside gravity shells — those should
-  glow too, they are the landing engine).
-- [ ] RCS: small GPUParticles3D puff emitters at the existing thruster
-  markers in ship.tscn (rescaled 1.8x with the hull), each firing OPPOSITE
-  the thrust it produces — translation puffs on the away side, torque puffs
-  in opposed pairs. White-blue, short-lived, quiet.
-- [ ] EVA suit thruster puffs: stretch, same pattern at MMU scale.
-- [ ] AudioManager hook comments alongside each emitter (no audio assets yet
-  — the M2 convention).
-- [ ] Gates: headless assertions that emitter activity tracks commanded
-  thrust per axis (burn forward → plume on, +X RCS quiet; yaw → the right
-  opposed pair). Screenshot: a main-engine burn against the dark side.
+- [x] `fx_thrust_local` / `fx_torque_local` on ship_controller, written where
+  forces are applied — flight-assist counter-burns included (they are real
+  firings); the autopilot writes its cruise burn (throttle from dv spent per
+  step) and zeroes it on release. Hands-off states read engines-cold.
+- [x] `ShipEffects` node (scripts/ship_effects.gd): stern plume + OmniLight
+  scaled by main throttle; per-face RCS puffs expelling OPPOSITE the thrust;
+  torque as opposed pairs (pitch/yaw nose+tail, roll wingtips); the belly
+  emitter is plume-sized and normalized against the main budget — it is the
+  landing engine inside gravity shells. Deadband (400 N / 300 N·m) keeps the
+  flight-assist station-keeping trickle from strobing the thrusters.
+- [x] Particles are LOCAL-space (world-space exhaust streaks out of frame at
+  the 131 m/s frame velocity — readability wins), soft radial-gradient
+  billboards (untextured additive quads read as literal white squares).
+- [x] AudioManager hook comments at the emitter flips; no audio assets yet.
+- [x] Gates: `tests/fx_test.gd` (17 checks) — pure signal→emitter mapping per
+  axis and opposed pair, deadband, end-to-end player burn, autopilot cruise
+  plume with cutoff-on-cancel. Evidence: 17_engine_burn.png (stern plume over
+  night-side city lights), 18_rcs_puffs.png.
+- [ ] EVA suit thruster puffs: stretch, same pattern at MMU scale — folds
+  into Track AN's suit pass.
 
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 
