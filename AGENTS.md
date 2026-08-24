@@ -34,8 +34,12 @@ cascade/
 ```bash
 ./fetch_assets.sh                     # used-only: fetch what the project references
 ./fetch_assets.sh --pack scifi_space  # whole-pack: browse before authoring
-godot --headless --import
 ```
+
+Both modes end by running `godot --headless --import` for you. A fetched `.gltf`
+is inert until Godot bakes its `.import` sidecar, and a missing import is silent
+— the mesh renders as nothing rather than erroring. Pass `--no-import` to skip
+that step, or set `GODOT` if the binary is not `godot` on your `PATH`.
 
 The one exception to "the server is the source of truth" is `assets/planets/`:
 nine static scientific rasters, committed, cooked once by

@@ -20,8 +20,14 @@ local asset server. **The server is the source of truth.** Nothing under
 ./fetch_assets.sh                       # used-only: fetch what the project references
 ./fetch_assets.sh --pack scifi_space    # whole-pack: browse before authoring
 ./fetch_assets.sh --pack                # whole-pack for every DEFAULT_PACKS entry
-godot --headless --import               # bake the .import sidecars
+./fetch_assets.sh --no-import           # ...and skip the import step
 ```
+
+Every mode ends by running `godot --headless --import` to bake the `.import`
+sidecars, because an unimported `.gltf` fails silently: the mesh renders as
+nothing, with no error. `--no-import` skips it (useful when chaining several
+fetches). The binary is looked up as `GODOT`, then `godot`, `godot4`, `godot-4`;
+if none is found the fetch still succeeds and prints the command to run.
 
 ### Used-only mode (the default)
 
