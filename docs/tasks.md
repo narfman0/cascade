@@ -898,6 +898,57 @@ existed only within 300 m of the ship, built lazily.
   memory, bounded by cache_capacity). Accepted; measured budgets in the
   planet_surface header comment still hold.
 
+## Track TF — Terrain fidelity: streamed high-detail heightmaps (INVESTIGATED 2026-08-25 — build on owner go)
+
+**The current numbers (measured, not guessed — owner asked "200 m?"):**
+
+| Layer | Effective size | In-game m/texel | Real-world data per texel |
+|---|---|---|---|
+| Global height map | 2048 eq | 6.1 m | 19.5 km |
+| L1 tiles (resident-always) | 4096 eq | 3.1 m | 9.8 km |
+| **L2 tiles (finest today)** | **8192 eq** | **1.53 m** | **4.9 km** |
+| Albedo | 4096 eq | 3.1 m | 9.8 km |
+| Mesh at max_depth 7 | — | 0.77 m verts | — |
+
+So in-game texel density is ~1.5 m — better than the 200 m guess — but the
+FEEL of coarseness is real and comes from the third column: at 3186×
+compression, one L2 texel spans **4.9 km of real Earth**. Hills, valleys,
+cliffs — every landform smaller than ~10 km real — simply is not in the
+data; the ground is bilinear blobs of continent-scale relief. The mesh
+already out-resolves the data 2:1; DATA is the bottleneck, then albedo.
+
+**Sources:** the ETOPO 60-arcsec cook source genuinely resolves an effective
+21600 eq (0.58 m in-game, 1.85 km real) — one free jump. Beyond that, the
+**AWS Terrarium tiles the site-inset cook already uses** (`_terrarium_window`,
+verified reachable) serve global elevation to z13+ (~19 m real) — effectively
+unlimited for our purposes, fetched per-tile, no giant downloads.
+
+**The design (machinery mostly exists — L2 streaming, footprint pins,
+collision-mirrors-mesh):**
+1. **Deepen the tile pyramid**: L3 (16384 eq → 0.77 m game / 2.4 km real,
+   matches today's mesh) and L4 (32768 eq → 0.38 m / 1.2 km real) cooked
+   from Terrarium, land-only, same 16-bit split encoding. Sizes: L3 ≈
+   ~40 land tiles (~8 MB, committable); L4 ≈ ~150 (~30 MB, committable at a
+   stretch); L5+ regional-on-demand via fetch script, gitignored.
+2. **Streaming residency per level**: the existing L2 enter/exit angular
+   margins generalize — each level gets a shrinking footprint around the
+   sub-ship point (the wanted_l2_keys / commit_tile / purge machinery is
+   already level-keyed). Memory watch: decoded tiles are ~3 MB each; cap
+   resident count per level.
+3. **Procedural amplification below the data** — likely the biggest visible
+   win on foot: seeded slope-modulated fractal detail blended in beneath
+   ~2 texels of the finest resident level, a few percent of local relief.
+   Because it lives in HeightSampler, mesh AND collision get it identically
+   for free (collision mirrors the mesh by construction since Track CV).
+4. **max_depth 8–9 under the footprint pin** (0.38/0.19 m verts) so the mesh
+   keeps out-resolving the new data; the pin bounds the patch count.
+5. **Albedo pyramid** (phase 2): NASA Blue Marble NG is 86400 eq (500 m
+   real); an A2/A3 albedo tier retires the 3 m/texel colour blur the same
+   way. Optional but the eye notices albedo before height.
+
+Estimated arc: cook tooling + L3/L4 + residency (1 session), amplification +
+depth raise + gates (1 session), albedo tier (1 session, separable).
+
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 
 Audit findings, then the plan. What is already RIGHT and must not regress:
