@@ -61,7 +61,32 @@ Output is ~111 MB: 76 MB of that is `libgodot_android.so`, the rest is the
 project's 117 MB of assets after compression.
 
 Install with `adb install -r build/cascade.apk` (platform-tools is in the SDK),
-or copy the APK to the device and open it.
+or fetch it over the LAN from the nginx vhost the owner runs on port 8080:
+
+```
+http://192.168.1.10:8080/cascade.apk
+```
+
+**SELinux note (Fedora, Enforcing):** files written into `build/` land as
+`user_tmp_t`, which nginx may not read — the symptom is a 403 with
+`open() ... (13: Permission denied)` in `/var/log/nginx/error.log`, and it is
+NOT a file-permission problem (the traversal path is already `o+x`). The
+directory is labelled once:
+
+```bash
+sudo chcon -R -t httpd_sys_content_t ~/workspace/cascade/build
+```
+
+New files inherit the directory's type, so **rebuilt APKs stay servable** —
+verified, not assumed. Only a full filesystem relabel would undo it; to
+survive even that, make it policy instead:
+
+```bash
+sudo semanage fcontext -a -t httpd_sys_content_t "/home/narfman0/workspace/cascade/build(/.*)?"
+sudo restorecon -Rv ~/workspace/cascade/build
+```
+
+Revert either with `sudo restorecon -R ~/workspace/cascade/build`.
 
 ## 4. Project settings this required
 
