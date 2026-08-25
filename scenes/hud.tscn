@@ -1,6 +1,7 @@
-[gd_scene load_steps=3 format=3 uid="uid://c8h4mn2p9r7ax"]
+[gd_scene load_steps=4 format=3 uid="uid://c8h4mn2p9r7ax"]
 
 [ext_resource type="Script" path="res://scripts/hud.gd" id="1_hud"]
+[ext_resource type="Script" path="res://scripts/perf_overlay.gd" id="2_perf"]
 
 [sub_resource type="Theme" id="Theme_hud"]
 default_font_size = 14
@@ -222,6 +223,17 @@ offset_bottom = 12.0
 text = "M — nav"
 horizontal_alignment = 1
 modulate = Color(0.45, 0.5, 0.52, 1)
+
+[node name="PerfOverlay" type="Label" parent="Root"]
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -360.0
+offset_top = 300.0
+offset_right = -20.0
+offset_bottom = 420.0
+text = ""
+mouse_filter = 2
+script = ExtResource("2_perf")
 
 [node name="PrograteMarker" type="Control" parent="Root"]
 custom_minimum_size = Vector2(16, 16)

@@ -60,7 +60,10 @@ func _ready() -> void:
 	max_contacts_reported = 8
 	fuel_remaining = fuel_capacity
 	_assist_gain = assist_gain_override if assist_gain_override > 0.0 else mass * 2.0
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# Handhelds have no mouse to capture, and asking for it there does nothing
+	# useful (touch input is Track TC's job).
+	if not OS.has_feature("mobile"):
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	fuel_changed.emit(fuel_remaining, fuel_capacity)
 
 

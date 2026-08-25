@@ -754,6 +754,81 @@ in atmosphere or similar."
 - Note: landing_test's "gas giants have no shell" gate updated — the rule
   CHANGED (they pull, harder than the main engine; they just never capture).
 
+## Track MB — Mobile build: Android APK (BUILT 2026-08-25, owner-requested)
+
+Full detail in `docs/mobile.md`. A signed debug APK builds and boots; it
+cannot be flown yet (Track TC). Toolchain is entirely user-local, no sudo:
+export templates, Android SDK (no NDK, no Gradle — prebuilt template APK),
+JDK 17, existing debug keystore. `godot --headless --export-debug "Android"
+build/cascade.apk` → ~111 MB, arm64-v8a, minSdk 24.
+
+**The finding that decided the build, made WITHOUT a phone:** Godot refuses
+`forward_plus` on Android, and Forward Mobile cannot read the depth buffer the
+atmosphere march clamps against — so every ray traverses the full 50 m shell
+instead of stopping at terrain, and Earth's 40 m relief fills 80% of that
+shell. The planet washes out under doubled in-scatter. `gl_compatibility`
+reads depth correctly and renders close to Forward+, so Android runs the
+"lowest" renderer on purpose. `tests/capture_renderer_probe.gd` reproduces all
+three renderers as one shot each — the only mobile self-verification available.
+
+- [x] ETC2/ASTC import, landscape lock, `canvas_items` stretch (14 px HUD on a
+  1080p panel is unreadable), no mouse-capture under `OS.has_feature("mobile")`.
+- [x] Debug-build perf overlay (FPS / worst frame / adapter / resolution) —
+  the boot test's instrument, since nothing here can measure a phone.
+- [x] All thirteen suites green after the project-setting changes.
+- [ ] OWNER: sideload and report — does it boot, does Earth look right, what
+  frame rate over an atmospheric planet? That answer gates whether Track TC is
+  worth building or whether the atmosphere needs a mobile budget first.
+
+## Track TC — Full touch controls for Android (QUEUED 2026-08-25, owner-requested)
+
+Cascade has NO touch input: ship torque reads `InputEventMouseMotion.relative`
+with the mouse captured, and everything else is keyboard (WASD/SPACE/C/Q/E,
+F interact, G latch, L autoland, M nav, X flight assist). An APK runs today
+(see Track MB) but cannot be flown. This track makes a phone a first-class
+input device.
+
+**The architectural rule that keeps it cheap: synthesize, do not rewrite.**
+A `TouchInput` CanvasLayer parses touches and feeds the EXISTING paths —
+`Input.action_press/release` for the mapped actions, and a public
+`add_look_delta(Vector2)` on the ship and suit controllers that the mouse
+handler already funnels into `_mouse_delta_accum`. Flight, EVA, walking,
+docking, landing and autoland code then never learn they are on a phone,
+and every existing gate keeps covering them.
+
+- [ ] **Ship flight:** left virtual stick = translation (X = lateral, Y =
+  fwd/back, tap-zones or a second mini-stick for up/down — the 6th axis is
+  the hard one to place); right half drag = pitch/yaw torque; twin roll
+  buttons; throttle-style hold for the main burn. FA toggle always visible
+  (it changes everything about how the stick feels).
+- [ ] **EVA free-flight:** same shape, MMU-scaled, plus latch.
+- [ ] **On foot (LD6):** left stick = run, right drag = look (drives the
+  camera boom pitch already built), one big JUMP button that doubles as the
+  jetpack on hold — the desktop scheme's semantics exactly.
+- [ ] **Context bar, not a fixed HUD:** the button set follows
+  `GameState.input_mode` + docked/landed/walking/latch-ready — EVA appears
+  only when flying, UNDOCK only when docked, AUTOLAND only inside a shell
+  (that predicate already exists as `AutolandComputer.can_engage`), BOARD
+  only near the bay. Never show a control that would do nothing.
+- [ ] **Nav console** (`scripts/nav_console.gd`) is a mouse-list UI: touch
+  target sizing, momentum scroll, a confirm button instead of double-click.
+- [ ] **Layout must be thumb-reachable and non-occluding**: the SURFACE and
+  APPROACH panels currently sit where a right thumb goes. Landscape-locked
+  (already set), safe-area/notch inset handling.
+- [ ] Optional but cheap: haptic tick on latch/capture/touchdown/band change
+  (`Input.vibrate_handheld`), sitting beside the existing AudioManager hooks.
+- [ ] Desktop is UNAFFECTED: the layer only instantiates on
+  `OS.has_feature("mobile")` (or a debug override for testing on desktop).
+- [ ] Gates: a headless suite driving synthesized touch events through the
+  same assertions the keyboard gates use (thrust on the right axes, torque
+  sign correct, jump apex unchanged on foot); plus a desktop-run override so
+  the layout can be screenshotted without a phone.
+
+**Owner-testing loop caveat:** none of this is self-verifiable here — the
+suites run headless on llvmpipe and no device is attached. Layout and feel
+need the phone in the owner's hands, so expect build → sideload → report
+cycles rather than the usual gate-and-ship rhythm.
+
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 
 Audit findings, then the plan. What is already RIGHT and must not regress:

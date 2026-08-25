@@ -29,6 +29,11 @@ AudioManager="*res://scripts/autoload/AudioManager.gd"
 
 window/size/viewport_width=1600
 window/size/viewport_height=900
+; Phones: scale the 1600x900 UI to the device screen rather than rendering a
+; 14 px HUD on a 1080p panel, and lock landscape — the flight HUD is wide.
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=1
 
 [input]
 
@@ -128,7 +133,22 @@ common/physics_ticks_per_second=60
 
 [rendering]
 
+; Required for Android export, and wanted anyway: the 4096x2048 Earth albedo
+; is 32 MB of VRAM uncompressed.
+textures/vram_compression/import_etc2_astc=true
+
 renderer/rendering_method="forward_plus"
+; Android runs gl_compatibility, and that is a DELIBERATE choice, not a
+; fallback. Godot refuses to export forward_plus to Android at all, which
+; leaves Forward Mobile or Compatibility — and Forward Mobile is the broken
+; one here: it cannot read the depth buffer that
+; assets/shaders/atmosphere_common.gdshaderinc clamps its march against, so
+; every ray traverses the full 50 m shell instead of stopping at terrain.
+; Earth's relief fills 80% of that shell, so the planet washes out under
+; doubled in-scatter. Compatibility reads depth correctly and renders close
+; to Forward+ (slightly oversaturated). Verified on the desktop, no phone
+; required: tests/capture_renderer_probe.gd, one shot per renderer.
+renderer/rendering_method.mobile="gl_compatibility"
 environment/defaults/default_clear_color=Color(0, 0, 0, 1)
 
 [shader_globals]
