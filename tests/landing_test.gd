@@ -34,6 +34,7 @@ func _ready() -> void:
 	_earth = _system.get_body(&"earth")
 
 	_test_field_values()
+	await _test_fast_descent_never_tunnels()
 	_test_standoffs_clear_shells()
 	_test_suit_twr_facts()
 	await _test_fa_holds_altitude()
@@ -62,6 +63,75 @@ func _g_at(body: CelestialBody, radii: float) -> float:
 	return _system.gravity_at([
 		body.true_pos[0] + body.def.radius * radii,
 		body.true_pos[1], body.true_pos[2]]).length()
+
+
+## The owner's report, as a gate: "I fly in and fall below the visible
+## surface before colliding." Dive at the Moon at 80 m/s — far too fast for
+## any capture — and the hull must STOP AT the rendered terrain, never pass
+## beneath it. Altitude is measured against the height SAMPLER (the same
+## function the visible mesh is displaced by), so "below the visible
+## surface" is a number, not an impression.
+func _test_fast_descent_never_tunnels() -> void:
+	print("\n== fast descent vs the visible surface ==")
+	var moon := _system.get_body(&"moon")
+	var surface := moon.planet_surface()
+	var sampler = surface.surface_res.make_sampler()
+	var dir := Vector3(0.3, 1, 0.2).normalized()
+	_ship.freeze = true
+	var deadline: int = Time.get_ticks_msec() + 20000
+	while Time.get_ticks_msec() < deadline:
+		_ship.global_position = OriginShift.to_render(moon.true_pos) \
+			+ dir * (moon.def.radius + 2400.0)
+		var fwd: Vector3 = dir.cross(Vector3.RIGHT).normalized()
+		_ship.global_basis = Basis(fwd.cross(dir).normalized(), dir, -fwd).orthonormalized()
+		await get_tree().physics_frame
+		surface.force_evaluate()
+		if _ship.global_position.length() < CelestialBody.MAX_RENDER_DISTANCE:
+			break
+	# Let the altitude pin build final terrain under the entry corridor.
+	for i in 90:
+		_ship.global_position = OriginShift.to_render(moon.true_pos) \
+			+ dir * (moon.def.radius + 2400.0)
+		await get_tree().physics_frame
+		surface.force_evaluate()
+	_ship.freeze = false
+	GameState.flight_assist_enabled = false
+	var mv: Array = moon.velocity_at(SimClock.sim_time)
+	_ship.linear_velocity = Vector3(float(mv[0]), float(mv[1]), float(mv[2])) - dir * 80.0
+
+	var worst_below: float = 0.0
+	var contacted := false
+	deadline = Time.get_ticks_msec() + 90000
+	while Time.get_ticks_msec() < deadline:
+		await get_tree().physics_frame
+		var centre: Vector3 = OriginShift.to_render(moon.true_pos)
+		var local_dir: Vector3 = surface.to_local(_ship.global_position).normalized()
+		var ground_r: float = moon.def.radius * (1.0 + sampler.height(local_dir))
+		var below: float = ground_r - (_ship.global_position - centre).length()
+		worst_below = maxf(worst_below, below)
+		var v_rel: Vector3 = _ship.linear_velocity \
+			- LandingComputer.surface_point_velocity(moon, _ship.global_position)
+		if _ship.get_colliding_bodies().size() > 0 or GameState.landed:
+			contacted = true
+		# Done once the impact has resolved (slowed right down or captured).
+		if contacted and (v_rel.length() < 5.0 or GameState.landed):
+			break
+	_check(contacted, "the dive actually reached the ground")
+	# The hull's half-height is 2.7 m: contact at belly depth is physical;
+	# metres past that is tunneling through the visible surface.
+	_check(worst_below < 4.0,
+		"never falls below the visible surface",
+		"worst penetration %.1f m (belly depth 2.7 allowed)" % worst_below)
+	# Clean up: lift clear for the suites that follow.
+	if GameState.landed:
+		(_ship.get_node("LandingComputer") as LandingComputer).release()
+	_ship.freeze = true
+	for i in 3:
+		_ship.global_position = OriginShift.to_render(moon.true_pos) + dir * (moon.def.radius * 3.0)
+		await get_tree().physics_frame
+	_ship.freeze = false
+	_ship.linear_velocity = Vector3(float(mv[0]), float(mv[1]), float(mv[2]))
+	GameState.flight_assist_enabled = true
 
 
 func _test_field_values() -> void:

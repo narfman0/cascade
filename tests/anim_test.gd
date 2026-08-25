@@ -96,13 +96,20 @@ func _test_state_sequence() -> void:
 		_check(false, "animator missing — sequence skipped")
 		return
 	var moon := _system.get_body(&"moon")
-	# Stage the suit on the Moon's surface, walking.
+	# Stage the suit just above the REAL terrain, not a radius guess: since
+	# collision mirrors the render planet-wide, a spot "1.02 R up" can be
+	# metres inside a hill — and a live body staged inside the trimesh is
+	# solver-ejected forever (the suite bounced in loco/fall until this).
+	var sampler = moon.planet_surface().surface_res.make_sampler()
 	_suit.call("request_exit")
 	_suit.freeze = true
 	var dir := Vector3(0, 1, 0.2).normalized()
 	for i in 5:
+		var local_dir: Vector3 = moon.planet_surface().to_local(
+			OriginShift.to_render(moon.true_pos) + dir).normalized()
+		var ground_r: float = moon.def.radius * (1.0 + sampler.height(local_dir))
 		_suit.global_position = OriginShift.to_render(moon.true_pos) \
-			+ dir * (moon.def.radius * 1.02)
+			+ dir * (ground_r + 2.5)
 		PhysicsServer3D.body_set_state(
 			_suit.get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, _suit.global_transform)
 		await get_tree().physics_frame
@@ -120,7 +127,12 @@ func _test_state_sequence() -> void:
 		String(_animator.current_clip()))
 
 	Input.action_press("thrust_forward")
-	for i in 60:
+	# Poll: coarse-terrain steps can flicker a stride through the fall state
+	# while the walker pin's builds land — the gate is the MAPPING, so accept
+	# run whenever it arrives inside the window.
+	var run_deadline: int = Time.get_ticks_msec() + 10000
+	while String(_animator.current_clip()) != "loco/run" \
+			and Time.get_ticks_msec() < run_deadline:
 		await get_tree().physics_frame
 	_check(String(_animator.current_clip()) == "loco/run", "W held → run",
 		String(_animator.current_clip()))
@@ -138,7 +150,11 @@ func _test_state_sequence() -> void:
 	_check(q_a.angle_to(q_b) > 0.02, "bones keep moving mid-run",
 		"%.3f rad in 0.2 s" % q_a.angle_to(q_b))
 	Input.action_release("thrust_forward")
-	for i in 40:
+	# Settle to a grounded stand before the jump.
+	var stand_deadline: int = Time.get_ticks_msec() + 10000
+	while (bool(_suit.get("_walk_airborne"))
+			or String(_animator.current_clip()) != "loco/idle") \
+			and Time.get_ticks_msec() < stand_deadline:
 		await get_tree().physics_frame
 
 	Input.action_press("thrust_up")

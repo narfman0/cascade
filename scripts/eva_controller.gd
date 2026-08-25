@@ -258,7 +258,10 @@ func stow() -> void:
 	# Defensive: a clamped suit being stowed must drop its anchors first.
 	release_rock()
 	if clamped_body != null:
-		clamped_body = null  # boarding from clamped never happens; don't hand off
+		var ps = clamped_body.planet_surface()
+		if ps != null and ps.walker_pin == self:
+			ps.walker_pin = null
+		clamped_body = null  # boarding from walk hands nothing off
 	var cs := get_node_or_null("CollisionShape3D") as CollisionShape3D
 	if cs:
 		cs.disabled = true
@@ -406,6 +409,10 @@ func enter_walk_on(body: CelestialBody) -> void:
 func _enter_walk(body: CelestialBody) -> void:
 	_clamp_parent = LandingComputer.clamp_to_surface(self, body)
 	clamped_body = body
+	# Pin terrain refinement around the boots (planet bodies only).
+	var ps = body.planet_surface()
+	if ps != null:
+		ps.walker_pin = self
 	# Seed the walk state from the arrival pose, in the surface-local frame.
 	var up: Vector3 = transform.origin.normalized()
 	_walk_fwd = -transform.basis.z
@@ -429,6 +436,9 @@ func _exit_walk() -> void:
 	var surface: Node3D = get_parent()
 	var vel_world: Vector3 = surface.global_transform.basis * _walk_vel
 	var body := clamped_body
+	var ps = body.planet_surface()
+	if ps != null and ps.walker_pin == self:
+		ps.walker_pin = null
 	LandingComputer.release_from_surface(self, body, _clamp_parent)
 	linear_velocity += vel_world
 	clamped_body = null
@@ -500,7 +510,15 @@ func _walk(delta: float) -> void:
 		pos = pos.normalized() * stand_r
 		_walk_vel -= up * v_rad
 		_walk_airborne = false
-	elif r > stand_r + 0.05:
+	elif not _walk_airborne and v_rad <= 0.3 and r <= stand_r + 0.7:
+		# Step-height snap: the ground truth is now the real trimesh at the
+		# local LOD, and running across a coarse patch's triangle edges steps
+		# the height by decimetres — without this the walker flickered into
+		# the fall state on every downhill stride. Feet follow steps up to
+		# 0.7 m; anything bigger is honestly airborne.
+		pos = pos.normalized() * stand_r
+		_walk_vel -= up * v_rad
+	elif r > stand_r + 0.7 or v_rad > 0.3:
 		_walk_airborne = true
 
 	# Jetpack departure: clearly climbing and clear of the ground → free EVA.

@@ -122,7 +122,6 @@ var _roots: Array = []
 var _cache: Dictionary = {}
 var _cache_tick: int = 0
 var _building: Dictionary = {}
-var _faces_pending: Dictionary = {}
 var _in_flight: int = 0
 var _task_ids: Array[int] = []
 var _eval_accum: float = 0.0
@@ -130,6 +129,10 @@ var _spin_angle: float = 0.0
 var _ratio: float = 1.0
 var _skim_body: StaticBody3D = null
 var _skim_ship: RigidBody3D = null
+## A second footprint pin: the WALKING suit (set by eva_controller while its
+## boots are on this body). Terrain under a walker converges to max depth just
+## like under the ship, so ground steps stay centimetre-scale underfoot.
+var walker_pin: Node3D = null
 var _collider_nodes: Dictionary = {}
 var _atmo_shell: MeshInstance3D = null
 var _atmo_material: ShaderMaterial = null
@@ -168,8 +171,6 @@ class CacheEntry extends RefCounted:
 	var mesh: ArrayMesh
 	var tick: int = 0
 	var refs: int = 0
-	var faces: PackedVector3Array
-	var has_faces: bool = false
 	var shape: ConcavePolygonShape3D = null
 
 
@@ -185,6 +186,15 @@ func setup(
 	atmosphere = p_atmosphere
 	# Sites are metres on the sphere, so their angular extent needs the radius.
 	surface_res.prepare(radius)
+	# The terrain's physics body exists from birth: colliders mirror rendered
+	# leaves at EVERY distance (the collision=visible rule), not just once a
+	# ship has dipped into skim range. Roots attach their colliders during
+	# this same setup call.
+	_skim_body = StaticBody3D.new()
+	_skim_body.name = "TerrainColliders"
+	_skim_body.collision_layer = 8   # environment
+	_skim_body.collision_mask = 0
+	add_child(_skim_body)
 	_build_site_states()
 
 	_material = ShaderMaterial.new()
@@ -281,8 +291,6 @@ func _evaluate() -> void:
 	var amp_m: float = radius * surface_res.amplitude
 	for root in _roots:
 		_update_node(root, cam_pos, amp_m)
-	if skim_active:
-		_refresh_colliders()
 	_evict_overflow()
 
 
@@ -318,8 +326,8 @@ func _update_node(node: QuadNode, cam_pos: Vector3, amp_m: float) -> void:
 	# range, and merges wait until the hull leaves. Without it, the camera
 	# receding on climb-out merges patches right under a hull five metres off
 	# the deck, and the error-metric-driven splits chase the camera down
-	# during descent. The collider swap guard in _refresh_colliders stays as
-	# a backstop, but with this pin nothing should ever swap beneath a hull.
+	# during descent. The swap guard (_swap_guarded) stays as a backstop, but
+	# with this pin nothing should ever swap beneath a hull.
 	var pinned := (node.depth < site_min_depth and _overlaps_resident_site(node)) \
 		or (node.depth < max_depth and _overlaps_skim_ship(node))
 	if node.children.is_empty():
@@ -353,8 +361,22 @@ func _update_morph(node: QuadNode, err: float, pinned: bool) -> void:
 ## The spherical cap the skim ship's footprint pins to max depth. 150 m of
 ## ground radius keeps the hull well clear of any pinned/unpinned boundary.
 func _overlaps_skim_ship(node: QuadNode) -> bool:
-	if not skim_active or _skim_ship == null or not is_instance_valid(_skim_ship):
+	if walker_pin != null and is_instance_valid(walker_pin):
+		var dir_w: Vector3 = to_local(walker_pin.global_position).normalized()
+		var reach_w: float = PlanetPatchMesh.span_m(radius, node.depth) * 0.75 / radius
+		if dir_w.angle_to(node.center.normalized()) < 150.0 / radius + reach_w:
+			return true
+	if _skim_ship == null or not is_instance_valid(_skim_ship):
 		return false
+	# From 2.5 km of altitude, not skim range: at approach speeds the pin
+	# needs tens of seconds of lead to finish its worker builds, so the
+	# ground under an incoming ship is final geometry (mesh AND collider)
+	# well before anything can touch it.
+	if not skim_active:
+		var alt: float = (_skim_ship.global_position - global_position).length() \
+			- radius * _ratio
+		if alt > 2500.0 or body_is_proxy:
+			return false
 	var local: Vector3 = to_local(_skim_ship.global_position)
 	if local.length_squared() < 1e-6:
 		return false
@@ -389,6 +411,12 @@ func _try_split(node: QuadNode) -> void:
 			_queue_build(node.face, node.depth + 1, cx, cy)
 	if not ready:
 		return
+	# The footprint swap guard (LD4): while a hull hugs the ground, never
+	# change the colliders beneath it — a fresh trimesh materializing under
+	# a live hull is a solver ejection. The mesh may still refine; the
+	# collider set catches up once the hull is clear.
+	if _swap_guarded(node):
+		return
 	for ci in 4:
 		var child := QuadNode.new()
 		child.face = node.face
@@ -402,11 +430,19 @@ func _try_split(node: QuadNode) -> void:
 		node.children.append(child)
 	if node.mi:
 		node.mi.visible = false
+	# Children now carry both render and collision for this square.
+	_sync_collider(node, false)
 
 
 func _merge(node: QuadNode) -> void:
 	if node.children.is_empty():
 		return
+	if _swap_guarded(node):
+		return
+	# Re-arm the parent's collider BEFORE freeing the children's: at no
+	# instant is this square of ground intangible.
+	if node.mi:
+		_sync_collider(node, true)
 	for child in node.children:
 		_merge(child)
 		_free_leaf(child)
@@ -429,6 +465,7 @@ func _attach_mesh(node: QuadNode, entry: CacheEntry) -> void:
 	mi.set_instance_shader_parameter(&"morph_t", 1.0 if node.depth == 0 else 0.0)
 	add_child(mi)
 	node.mi = mi
+	_sync_collider(node, true)
 
 
 func _free_leaf(node: QuadNode) -> void:
@@ -465,18 +502,25 @@ func _queue_build(face: int, depth: int, x: int, y: int) -> void:
 	# stalled refinement for seconds after bootstrap.
 	_task_ids.append(WorkerThreadPool.add_task(func() -> void:
 		var arrays := PlanetPatchMesh.build_arrays(srf, r, face, depth, x, y, sd)
-		commit.call_deferred(arrays, depth)
+		# Collision is built WITH the mesh, on the same worker: a patch's
+		# collider exists the instant its mesh can render, so the visible
+		# surface and the physical one can never diverge (the owner fell
+		# through hills the sea-level sphere didn't know about).
+		var shape := ConcavePolygonShape3D.new()
+		shape.backface_collision = true
+		shape.set_faces(PlanetPatchMesh.collision_faces(arrays))
+		commit.call_deferred(arrays, depth, shape)
 	, true))
 
 
-func _commit_build(arrays: Dictionary, depth: int) -> void:
+func _commit_build(arrays: Dictionary, depth: int, shape: ConcavePolygonShape3D = null) -> void:
 	_in_flight -= 1
 	_building.erase(arrays["key"])
 	if not _cache.has(arrays["key"]):
-		_store_entry(arrays, depth)
+		_store_entry(arrays, depth, shape)
 
 
-func _store_entry(arrays: Dictionary, depth: int) -> CacheEntry:
+func _store_entry(arrays: Dictionary, depth: int, shape: ConcavePolygonShape3D = null) -> CacheEntry:
 	var mesh_arrays: Array = []
 	mesh_arrays.resize(Mesh.ARRAY_MAX)
 	mesh_arrays[Mesh.ARRAY_VERTEX] = arrays["verts"]
@@ -495,6 +539,12 @@ func _store_entry(arrays: Dictionary, depth: int) -> CacheEntry:
 	entry.depth = depth
 	entry.arrays = arrays
 	entry.mesh = mesh
+	if shape == null:
+		# Synchronous path (roots at setup): build the shape here.
+		shape = ConcavePolygonShape3D.new()
+		shape.backface_collision = true
+		shape.set_faces(PlanetPatchMesh.collision_faces(arrays))
+	entry.shape = shape
 	_cache_tick += 1
 	entry.tick = _cache_tick
 	_cache[entry.key] = entry
@@ -935,13 +985,6 @@ func _enter_skim(ship: RigidBody3D) -> void:
 	_skim_ship = ship
 	# 60 Hz physics and a fast pass over ~25 m patches will tunnel without CCD.
 	ship.continuous_cd = true
-	if _skim_body == null:
-		_skim_body = StaticBody3D.new()
-		_skim_body.name = "SkimTerrain"
-		_skim_body.collision_layer = 8   # environment
-		_skim_body.collision_mask = 0
-		add_child(_skim_body)
-	_refresh_colliders()
 
 
 func _exit_skim() -> void:
@@ -954,97 +997,51 @@ func _exit_skim() -> void:
 	_collider_nodes.clear()
 
 
-func _refresh_colliders() -> void:
-	if _skim_ship == null or not is_instance_valid(_skim_ship):
-		return
-	var ship_pos := _skim_ship.global_position
-	# Swap guard (LD4): while the hull hugs the ground, freeze the collider
-	# set in its footprint. A LOD change swaps in a different triangulation of
-	# the same relief, whose surface can sit metres from the old one — and a
-	# trimesh materializing inside a hull five metres off the deck gets that
-	# hull ejected by the solver at tens of m/s (measured: 68 m/s on climb-out
-	# at Earth). Far patches still swap freely; the footprint catches up the
-	# moment the ship climbs above the relief band.
-	var amp_m: float = radius * surface_res.amplitude
-	var alt: float = (ship_pos - global_position).length() - radius
-	var guard: bool = alt < amp_m + 80.0
-	var wanted: Dictionary = {}
-	var leaves: Array = []
-	for root in _roots:
-		_gather_leaves(root, leaves)
-	for node in leaves:
-		var span: float = PlanetPatchMesh.span_m(radius, node.depth)
-		var world_center: Vector3 = global_transform * node.center
-		var reach: float = skim_collider_range + span
-		if world_center.distance_to(ship_pos) > reach:
-			continue
-		wanted[node.key] = true
-		if (
-			guard and not _collider_nodes.has(node.key)
-			and world_center.distance_to(ship_pos) < span * 2.0 + 60.0
-		):
-			continue  # no new geometry under the hull
-		_ensure_collider(node)
-	for key in _collider_nodes.keys():
-		if not wanted.has(key):
-			var cs: CollisionShape3D = _collider_nodes[key]
-			if guard:
-				var center: Vector3 = _skim_body.global_transform * cs.position
-				var keep_r: float = float(cs.get_meta("guard_span", 60.0)) * 2.0 + 60.0
-				if center.distance_to(ship_pos) < keep_r:
-					continue  # keep the ground the hull is standing on
-			cs.queue_free()
-			_collider_nodes.erase(key)
-
-
-func _ensure_collider(node: QuadNode) -> void:
-	if _collider_nodes.has(node.key):
-		return
-	var entry: CacheEntry = _cache.get(node.key)
-	if entry == null:
-		return
-	if entry.shape == null:
-		if not entry.has_faces:
-			_queue_faces(entry)
+## Attach or remove the collider that mirrors a node's rendered mesh. The
+## shape was built on the same worker as the mesh, so `want=true` can never
+## be a frame early or late: what you see is what you hit, at every depth,
+## planet-wide. The whole set is enabled/disabled by distance in one place
+## (set_collision_active) via the StaticBody's layer.
+func _sync_collider(node: QuadNode, want: bool) -> void:
+	var have: CollisionShape3D = _collider_nodes.get(node.key)
+	if want:
+		if have != null:
 			return
-		var shape := ConcavePolygonShape3D.new()
-		# Both-sided: skimming must never depend on which side of a triangle a
-		# CCD sweep happens to start from.
-		shape.backface_collision = true
-		shape.set_faces(entry.faces)
-		entry.shape = shape
-	var cs := CollisionShape3D.new()
-	cs.shape = entry.shape
-	cs.position = Vector3.ZERO  # collision faces are body-local too
-	# The swap guard sizes its keep-radius from this after the node is gone.
-	cs.set_meta("guard_span", PlanetPatchMesh.span_m(radius, node.depth))
-	_skim_body.add_child(cs)
-	_collider_nodes[node.key] = cs
+		var entry: CacheEntry = _cache.get(node.key)
+		if entry == null or entry.shape == null:
+			return
+		var cs := CollisionShape3D.new()
+		cs.shape = entry.shape
+		cs.position = Vector3.ZERO  # faces are body-local
+		_skim_body.add_child(cs)
+		_collider_nodes[node.key] = cs
+	elif have != null:
+		have.queue_free()
+		_collider_nodes.erase(node.key)
 
 
-## Collision faces are extracted from the render arrays on the same worker
-## tasks as everything else (design doc, "skimming is supported").
-func _queue_faces(entry: CacheEntry) -> void:
-	if _faces_pending.has(entry.key) or _in_flight >= max_in_flight:
-		return
-	_faces_pending[entry.key] = true
-	_in_flight += 1
-	var key := entry.key
-	var arrays := entry.arrays
-	var commit: Callable = _commit_faces
-	_task_ids.append(WorkerThreadPool.add_task(func() -> void:
-		var faces := PlanetPatchMesh.collision_faces(arrays)
-		commit.call_deferred(key, faces)
-	, true))
+## The LD4 footprint guard, now guarding the SWAP itself: while the hull is
+## inside the relief band and this square is under it, defer split/merge —
+## the collider set beneath a live hull must not change (a fresh trimesh
+## materializing there is a measured 68 m/s solver ejection). The refinement
+## retries every evaluate pass and proceeds the moment the hull is clear.
+func _swap_guarded(node: QuadNode) -> bool:
+	if _skim_ship == null or not is_instance_valid(_skim_ship):
+		return false
+	var ship_pos := _skim_ship.global_position
+	var alt: float = (ship_pos - global_position).length() - radius * _ratio
+	if alt > radius * surface_res.amplitude + 80.0:
+		return false
+	var span: float = PlanetPatchMesh.span_m(radius, node.depth)
+	var world_center: Vector3 = global_transform * node.center
+	return world_center.distance_to(ship_pos) < span + 60.0
 
 
-func _commit_faces(key: String, faces: PackedVector3Array) -> void:
-	_in_flight -= 1
-	_faces_pending.erase(key)
-	var entry: CacheEntry = _cache.get(key)
-	if entry:
-		entry.faces = faces
-		entry.has_faces = true
+## Master switch, driven by CelestialBody by distance/proxy: layer 8 collides,
+## layer 0 is inert. One flag instead of hundreds of per-shape toggles.
+func set_collision_active(active: bool) -> void:
+	if _skim_body:
+		_skim_body.collision_layer = 8 if active else 0
 
 
 func _gather_leaves(node: QuadNode, out: Array) -> void:
@@ -1075,4 +1072,4 @@ func stats() -> Dictionary:
 
 
 func is_quiescent() -> bool:
-	return _in_flight == 0 and _building.is_empty() and _faces_pending.is_empty()
+	return _in_flight == 0 and _building.is_empty()

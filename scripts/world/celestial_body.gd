@@ -199,12 +199,20 @@ func update_render(t: float) -> void:
 		# Spin is analytic from sim_time, like the orbits — never accumulated.
 		_surface.update_spin(t)
 
-	var want_collision: bool = true_distance < def.radius + COLLISION_ACTIVATION_MARGIN
-	if _surface and _surface.skim_active:
-		# Inside skim range the resident patches are the physics truth: the
-		# sphere would wall the ship out of valleys and let peaks through.
-		want_collision = false
-	if _collision.disabled == want_collision:
+	var want_collision: bool = true_distance < def.radius + COLLISION_ACTIVATION_MARGIN \
+		and not is_proxy
+	if _surface != null:
+		# Terrain bodies: the rendered patches ARE the physics, at every
+		# distance — every resident leaf carries a collider built from the
+		# same arrays as its mesh (PlanetSurface._sync_collider). The old
+		# sea-level sphere is gone for these bodies: it walled the ship out
+		# of valleys and, worse, let it fall THROUGH hills into an invisible
+		# floor 40 m under the summit (the owner felt exactly that). The
+		# sphere remains only for surfaceless bodies (the Sun).
+		_surface.set_collision_active(want_collision)
+		if not _collision.disabled:
+			_collision.disabled = true
+	elif _collision.disabled == want_collision:
 		_collision.disabled = not want_collision
 
 
@@ -251,9 +259,9 @@ func visual_radius() -> float:
 
 
 ## The progressive terrain node, or null for sphere-only bodies (the Sun).
-## Whether the analytic sphere is currently carrying collision. False in skim
-## range, where the resident patches take over — the swap has to happen in both
-## directions or the ship is either walled out of valleys or passes through peaks.
+## Whether the analytic sphere is carrying collision. Only ever true for
+## surfaceless bodies (the Sun): terrain bodies collide with their rendered
+## patches at every distance.
 func sphere_collider_enabled() -> bool:
 	return _collision != null and not _collision.disabled
 

@@ -731,39 +731,77 @@ func _test_approach_refinement() -> void:
 ## --- PR2: skim collision ----------------------------------------------------
 
 func _test_skim_collision() -> void:
-	print("\n== skim collision ==")
+	print("\n== collision mirrors the render ==")
 	var earth := _system.get_body(&"earth")
 	var surface := earth.planet_surface()
 
-	# Near enough for the body's collision to be active at all (the pre-existing
-	# rule is radius + COLLISION_ACTIVATION_MARGIN), but well outside skim range:
-	# here the analytic sphere is the collision truth and no patch carries one.
+	# The rule changed (owner report: "I fall below the visible surface
+	# before colliding"): the rendered patches ARE the physics at EVERY
+	# distance now. The sea-level sphere is gone for terrain bodies, and
+	# every visible leaf must carry a collider built from its own arrays.
 	var above_skim: float = earth.def.radius + 6000.0
 	await _settle_at(earth, above_skim)
 	_check(not surface.skim_active, "skim inactive above skim range")
-	_check(earth.sphere_collider_enabled(),
-		"sphere collider carries collision outside skim range")
-	_check(int(surface.stats()["colliders"]) == 0,
-		"no patch colliders outside skim range")
+	_check(not earth.sphere_collider_enabled(),
+		"terrain bodies never use the sphere")
+	_check(_collider_matches_render(surface),
+		"every visible leaf has a collider (high)", _mirror_detail(surface))
 
-	# Low: patch colliders take over and the sphere must stand down. Both halves
-	# matter — a live sphere walls the ship out of valleys, and missing patch
-	# colliders make the peaks intangible.
 	await _settle_at(earth, earth.def.radius + 120.0)
 	_check(surface.skim_active, "skim engages near the surface")
-	_check(not earth.sphere_collider_enabled(),
-		"sphere collider stands down in skim range")
-	var stats: Dictionary = surface.stats()
-	_check(int(stats["colliders"]) > 0, "patches carry colliders in skim range",
-		"(%d)" % stats["colliders"])
+	_check(_collider_matches_render(surface),
+		"every visible leaf has a collider (low)", _mirror_detail(surface))
 	_check(_ship.continuous_cd, "ship CCD is on in skim range")
 
-	# And the swap reverses on climb-out.
+	# The collider under the ship is built from the same arrays as the mesh:
+	# a ray down must land on the sampler's surface, not a sphere.
+	var down: Vector3 = (OriginShift.to_render(earth.true_pos)
+		- _ship.global_position).normalized()
+	var q := PhysicsRayQueryParameters3D.create(
+		_ship.global_position, _ship.global_position + down * 500.0)
+	q.exclude = [_ship.get_rid()]
+	var hit: Dictionary = _ship.get_world_3d().direct_space_state.intersect_ray(q)
+	_check(not hit.is_empty(), "ray from the ship finds the terrain collider")
+	if not hit.is_empty():
+		var dir_local: Vector3 = surface.to_local(hit.position).normalized()
+		var sampler = surface.surface_res.make_sampler()
+		var want_r: float = earth.def.radius * (1.0 + sampler.height(dir_local))
+		var got_r: float = surface.to_local(hit.position).length()
+		_check(absf(got_r - want_r) < 25.0,
+			"collision surface sits on the rendered heightfield",
+			"(off by %.1f m; LOD geometric error allowed)" % absf(got_r - want_r))
+
 	await _settle_at(earth, above_skim)
 	_check(not surface.skim_active, "skim disengages on climb-out")
-	_check(earth.sphere_collider_enabled(), "sphere collider comes back")
-	_check(int(surface.stats()["colliders"]) == 0, "patch colliders released")
 	_check(not _ship.continuous_cd, "ship CCD is off again")
+
+
+func _collider_matches_render(surface: PlanetSurface) -> bool:
+	return _mirror_gap(surface) == 0
+
+
+func _mirror_gap(surface: PlanetSurface) -> int:
+	var colliders: Dictionary = surface.get("_collider_nodes")
+	var gap: int = 0
+	for root in surface.get("_roots"):
+		gap += _walk_mirror(root, colliders)
+	return gap
+
+
+func _walk_mirror(node, colliders: Dictionary) -> int:
+	var gap: int = 0
+	if node.children.is_empty():
+		if node.mi != null and node.mi.visible and not colliders.has(node.key):
+			gap += 1
+	else:
+		for child in node.children:
+			gap += _walk_mirror(child, colliders)
+	return gap
+
+
+func _mirror_detail(surface: PlanetSurface) -> String:
+	return "(%d visible leaves uncovered, %d colliders resident)" % [
+		_mirror_gap(surface), (surface.get("_collider_nodes") as Dictionary).size()]
 
 
 ## --- Helpers ----------------------------------------------------------------

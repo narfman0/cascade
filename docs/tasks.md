@@ -859,6 +859,45 @@ and every existing gate keeps covering them.
 **Owner-testing loop caveat:** the gates prove synthesis, not feel — expect
 build → sideload → report cycles for tuning.
 
+## Track CV — Collision IS the visible terrain (BUILT 2026-08-25, owner-reported)
+
+Owner: "I still fly in and fall below the visible surface before colliding.
+Load higher fidelity terrain, and use whatever is loaded for collisions."
+Implemented literally — the report was the old architecture's known lie:
+outside 500 m the collider was an analytic sphere at SEA LEVEL, so any hill
+(+40 m on Earth) was visually solid and physically empty; skim trimeshes
+existed only within 300 m of the ship, built lazily.
+
+- [x] Collision shapes are now built ON THE SAME WORKER as each patch's mesh
+  arrays and stored with the cache entry — a collider exists the instant a
+  mesh can render, and it is the SAME displaced geometry.
+- [x] Colliders mirror rendered leaves at the swap points themselves:
+  `_attach_mesh` attaches, `_free_leaf` frees, split removes the parent's
+  only after all four children carry theirs, merge re-arms the parent's
+  BEFORE freeing the children's — at no instant is ground intangible.
+- [x] The sea-level sphere is GONE for terrain bodies (kept for the Sun);
+  one master switch (`set_collision_active`, StaticBody layer) handles the
+  distance/proxy gate that used to toggle the sphere.
+- [x] The max-depth footprint pin engages from 2.5 km of ALTITUDE (was: only
+  inside 500 m skim), so an incoming ship's corridor is final geometry —
+  mesh and collider both — tens of seconds before contact. The LD4 swap
+  guard now guards the split/merge itself (defer under a grounded hull).
+- [x] Walking got two upgrades in the fallout: a `walker_pin` refines
+  terrain to max depth under the suit's boots (the ship pin never followed
+  the walker), and the walk gained a 0.7 m step-height snap — the ground
+  truth is the real trimesh now, and coarse-LOD triangle edges used to
+  flicker every downhill stride into the fall state.
+- [x] Gates: planet_test rewritten for the new rule — every visible leaf has
+  a collider at high AND low altitude (0 uncovered / 555 resident), a ray
+  from the ship lands on the sampler's heightfield (0.1 m off), sphere never
+  used for terrain. landing_test adds the owner's report as arithmetic: an
+  80 m/s dive at the Moon shows 0.0 m penetration below the visible surface.
+  anim_test stages against the sampler (1.02 R staging put the suit INSIDE
+  a hill that used to be intangible — the new colliders rightly ejected it).
+- Cost note: cache entries now carry their collision shape (~+70% cache
+  memory, bounded by cache_capacity). Accepted; measured budgets in the
+  planet_surface header comment still hold.
+
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 
 Audit findings, then the plan. What is already RIGHT and must not regress:
