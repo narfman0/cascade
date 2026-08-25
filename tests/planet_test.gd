@@ -592,7 +592,11 @@ func _test_geomorph_targets() -> void:
 	var arrays: Dictionary = _build(surface, 0, 3, 2, 5)
 	var verts: PackedVector3Array = arrays["verts"]
 	var ppos: PackedFloat32Array = arrays["parent_pos"]
-	_check(ppos.size() == verts.size() * 3,
+	# Stride 4, not 3: the custom arrays are ARRAY_CUSTOM_RGBA_FLOAT (the
+	# 3-component variant is not dependably delivered by GLES drivers, and a
+	# padding float per channel is cheap insurance on a platform that cannot
+	# be debugged interactively from here).
+	_check(ppos.size() == verts.size() * 4,
 		"parent targets cover every vertex, skirts included")
 
 	var n: int = PlanetPatchMesh.GRID + 1
@@ -601,13 +605,13 @@ func _test_geomorph_targets() -> void:
 	for j in range(0, n, 2):
 		for i in range(0, n, 2):
 			var idx: int = j * n + i
-			var pv := Vector3(ppos[idx * 3], ppos[idx * 3 + 1], ppos[idx * 3 + 2])
+			var pv := Vector3(ppos[idx * 4], ppos[idx * 4 + 1], ppos[idx * 4 + 2])
 			if (pv - verts[idx]).length() > 0.001:
 				even_exact = false
 	for j in range(0, n, 2):
 		for i in range(1, n, 2):
 			var idx: int = j * n + i
-			var pv := Vector3(ppos[idx * 3], ppos[idx * 3 + 1], ppos[idx * 3 + 2])
+			var pv := Vector3(ppos[idx * 4], ppos[idx * 4 + 1], ppos[idx * 4 + 2])
 			var mid: Vector3 = (verts[idx - 1] + verts[idx + 1]) * 0.5
 			if (pv - mid).length() > 0.001:
 				odd_mid = false
@@ -620,7 +624,7 @@ func _test_geomorph_targets() -> void:
 	var rpos: PackedFloat32Array = root["parent_pos"]
 	var self_target := true
 	for k in rverts.size():
-		var pv := Vector3(rpos[k * 3], rpos[k * 3 + 1], rpos[k * 3 + 2])
+		var pv := Vector3(rpos[k * 4], rpos[k * 4 + 1], rpos[k * 4 + 2])
 		if (pv - rverts[k]).length() > 0.001:
 			self_target = false
 	_check(self_target, "root patches morph to themselves")
@@ -782,8 +786,11 @@ func _edge_gap(a: Dictionary, b: Dictionary) -> float:
 		var bi: int = row * (grid + 1)          # first column of b
 		if ai >= av.size() or bi >= bv.size():
 			continue
-		var pa: Vector3 = av[ai] + a["center"]
-		var pb: Vector3 = bv[bi] + b["center"]
+		# Vertices are BODY-local now (they stopped being patch-relative when
+		# the Android build proved instance uniforms unreliable) — adding the
+		# centre here would double-count it.
+		var pa: Vector3 = av[ai]
+		var pb: Vector3 = bv[bi]
 		worst = maxf(worst, (pa - pb).length())
 	return worst
 
@@ -791,12 +798,11 @@ func _edge_gap(a: Dictionary, b: Dictionary) -> float:
 ## The four grid corners of a patch, in body space.
 func _patch_corners(arrays: Dictionary) -> Array[Vector3]:
 	var v: PackedVector3Array = arrays["verts"]
-	var centre: Vector3 = arrays["center"]
 	var n: int = PlanetPatchMesh.GRID + 1
 	var out: Array[Vector3] = []
 	for idx in [0, n - 1, (n - 1) * n, n * n - 1]:
 		if idx < v.size():
-			out.append(v[idx] + centre)
+			out.append(v[idx])   # already body-local
 	return out
 
 

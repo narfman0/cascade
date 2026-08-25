@@ -4,9 +4,12 @@ class_name PlanetPatchMesh
 ## A patch is a 33×33 vertex grid (32×32 quads) on one cube face, normalized to
 ## the sphere and displaced by the body's height sampler, plus a skirt ring
 ## dropped below the surface to hide cracks between neighbouring depths.
-## Vertices are stored RELATIVE TO THE PATCH CENTER: float32 stays exact at
-## patch scale, and the center is applied via the patch node's transform, which
-## the existing origin/proxy machinery already moves.
+## Vertices are BODY-local (patch node sits at the body origin). They used to
+## be patch-relative, with the shader re-adding a `patch_center` instance
+## uniform — until an Android build showed instance uniforms do not survive
+## real GLES drivers: patch_center read as zero and every patch textured
+## itself as a starburst. float32 is comfortable here anyway (Jupiter's
+## 8000 m radius leaves ~1 mm against metre-scale vertex spacing).
 ##
 ## Everything here is a static function of (surface, radius, face, depth, x, y)
 ## with no other state — same inputs, bit-identical arrays, on any thread. That
@@ -53,7 +56,9 @@ static func span_m(radius: float, depth: int) -> float:
 ##   indices: PackedInt32Array (grid triangles first, then skirt triangles)
 ##   grid_index_count: int — index count before skirts (collision uses only
 ##     these: skirts point inward and would add useless triangles)
-##   center: Vector3 — undisplaced sphere point at patch center, patch-node
+##   center: Vector3 — undisplaced sphere point at patch center. Vertices are
+##   BODY-local (not patch-relative), so this is metadata for LOD/site math
+##   and collider placement, NOT an offset to add to verts.
 ##     local position under PlanetSurface
 static func build_arrays(
 	surface: BodySurface, radius: float, face: int, depth: int, x: int, y: int,
@@ -88,7 +93,15 @@ static func build_arrays(
 		for i in n:
 			var ai: int = (j + 1) * apron_n + (i + 1)
 			var p: Vector3 = apron[ai]
-			verts[j * n + i] = p - center
+			# BODY-local, not patch-local. Patch-local vertices existed only so
+			# the shader could re-add a `patch_center` instance uniform — and
+			# instance uniforms do not survive real GLES drivers under the
+			# Compatibility renderer (Android): patch_center read as zero,
+			# v_sdir swept the whole equirect map across every patch, and the
+			# planet textured itself as per-patch starbursts. Body-local costs
+			# nothing: Jupiter's 8000 m radius still leaves ~1 mm of float32
+			# precision against metre-scale vertex spacing.
+			verts[j * n + i] = p
 			# cross(dv, du) points outward on every face (u-right, v-down).
 			var du: Vector3 = apron[ai + 1] - apron[ai - 1]
 			var dv: Vector3 = apron[ai + apron_n] - apron[ai - apron_n]
@@ -166,7 +179,9 @@ static func build_arrays(
 		var base: int = verts.size()
 		for k in n:
 			var gi: int = start + k * step
-			var p: Vector3 = verts[gi] + center
+			# verts are already body-local — adding center here double-counted
+			# it and skewed every skirt's fall direction.
+			var p: Vector3 = verts[gi]
 			var fall: Vector3 = p.normalized() * drop
 			verts.append(verts[gi] - fall)
 			normals.append(normals[gi])
@@ -206,19 +221,27 @@ static func build_arrays(
 	}
 
 
-## CUSTOM mesh arrays take flat floats, not Vector3s.
+## CUSTOM mesh arrays take flat floats, not Vector3s — and FOUR of them per
+## vertex, not three. `ARRAY_CUSTOM_RGB_FLOAT` (3-component) is not reliably
+## delivered by GLES3 drivers under the Compatibility renderer: CUSTOM0 then
+## reads as zero, the geomorph mixes every vertex toward the patch's own
+## local origin, and the planet shatters into per-patch starbursts (seen on
+## an Android build, reproduced on the desktop by
+## tests/capture_morph_probe.gd). RGBA_FLOAT costs one padding float per
+## vertex per channel and works everywhere.
 static func _flatten(v: PackedVector3Array) -> PackedFloat32Array:
 	var out := PackedFloat32Array()
-	out.resize(v.size() * 3)
+	out.resize(v.size() * 4)
 	for i in v.size():
 		var p: Vector3 = v[i]
-		out[i * 3] = p.x
-		out[i * 3 + 1] = p.y
-		out[i * 3 + 2] = p.z
+		out[i * 4] = p.x
+		out[i * 4 + 1] = p.y
+		out[i * 4 + 2] = p.z
+		out[i * 4 + 3] = 0.0
 	return out
 
 
-## Flattened triangle list for a ConcavePolygonShape3D, patch-center relative.
+## Flattened triangle list for a ConcavePolygonShape3D, body-local.
 ## Grid triangles only — skirts are render-side crack fillers, not terrain.
 static func collision_faces(arrays: Dictionary) -> PackedVector3Array:
 	var verts: PackedVector3Array = arrays["verts"]

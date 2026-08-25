@@ -421,9 +421,9 @@ func _attach_mesh(node: QuadNode, entry: CacheEntry) -> void:
 	entry.refs += 1
 	var mi := MeshInstance3D.new()
 	mi.mesh = entry.mesh
-	mi.position = node.center
+	# Vertices are body-local now, so the patch node sits at the body origin.
+	mi.position = Vector3.ZERO
 	mi.material_override = _material
-	mi.set_instance_shader_parameter(&"patch_center", node.center)
 	# A freshly attached patch renders as its parent did (morph 0) and morphs
 	# in as the camera closes; roots have no parent level to morph from.
 	mi.set_instance_shader_parameter(&"morph_t", 1.0 if node.depth == 0 else 0.0)
@@ -486,8 +486,8 @@ func _store_entry(arrays: Dictionary, depth: int) -> CacheEntry:
 	mesh_arrays[Mesh.ARRAY_CUSTOM0] = arrays["parent_pos"]
 	mesh_arrays[Mesh.ARRAY_CUSTOM1] = arrays["parent_nrm"]
 	var flags: int = \
-		(Mesh.ARRAY_CUSTOM_RGB_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT) \
-		| (Mesh.ARRAY_CUSTOM_RGB_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM1_SHIFT)
+		(Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT) \
+		| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM1_SHIFT)
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh_arrays, [], {}, flags)
 	var entry := CacheEntry.new()
@@ -1015,7 +1015,7 @@ func _ensure_collider(node: QuadNode) -> void:
 		entry.shape = shape
 	var cs := CollisionShape3D.new()
 	cs.shape = entry.shape
-	cs.position = node.center
+	cs.position = Vector3.ZERO  # collision faces are body-local too
 	# The swap guard sizes its keep-radius from this after the node is gone.
 	cs.set_meta("guard_span", PlanetPatchMesh.span_m(radius, node.depth))
 	_skim_body.add_child(cs)

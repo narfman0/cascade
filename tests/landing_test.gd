@@ -248,22 +248,15 @@ func _test_descent_and_landing() -> void:
 func _test_surface_walk(suit: RigidBody3D) -> void:
 	print("\n== surface walk ==")
 	# Fall ~2 m from the lifted hatch onto the ground; auto-walk captures.
-	var deadline: int = Time.get_ticks_msec() + 20000
+	# Generous: the suit exits with flight assist ON, and FA cannot beat
+	# Earth's 2.45 m/s² with 2.0 m/s² of thrust — so it sinks the last few
+	# metres slowly, on purpose. Roughly five seconds of sim, and llvmpipe
+	# runs physics well under real time.
+	var deadline: int = Time.get_ticks_msec() + 90000
 	var tick: int = 0
 	while suit.get("clamped_body") == null and Time.get_ticks_msec() < deadline:
 		await get_tree().physics_frame
 		tick += 1
-		if tick % 60 == 0:
-			var names: Array = []
-			for c in suit.get_colliding_bodies():
-				names.append(c.name)
-			var alt: float = (suit.global_position
-				- OriginShift.to_render(_earth.true_pos)).length() - _earth.def.radius
-			var vrel: Vector3 = suit.linear_velocity 				- LandingComputer.surface_point_velocity(_earth, suit.global_position)
-			print("    [fall %3d] alt %.1f vrel %.2f contacts %s frozen=%s cooldown %.2f" % [
-				tick, alt, vrel.length(), names, suit.freeze, suit.get("_walk_cooldown")])
-		if tick > 600:
-			break
 	_check(suit.get("clamped_body") == _earth, "touching ground auto-enters the walk")
 	_check(suit.get_parent() == _earth.planet_surface(),
 		"walking suit rides the surface frame")

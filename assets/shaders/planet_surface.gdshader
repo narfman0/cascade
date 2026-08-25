@@ -19,7 +19,6 @@ uniform bool has_sea_spec = false;
 
 // Patch-node local position under PlanetSurface — the patch center. Vertices
 // are stored relative to it (float32 discipline, docs/planet-renderer.md).
-instance uniform vec3 patch_center;
 
 // Geomorph factor (PR5): 0 = render this patch as its parent's surface
 // (CUSTOM0/CUSTOM1 carry the parent-level position and normal per vertex),
@@ -68,15 +67,25 @@ uniform float cloud_shadow_strength : hint_range(0.0, 1.0) = 0.45;
 
 // Sphere direction in surface-local (terrain) space: spin rotates the whole
 // PlanetSurface node, and patches sit under it by pure translation, so
-// VERTEX + patch_center normalized is exactly the direction the bake sampled.
+// The body-local vertex, normalized, is exactly the direction the bake sampled.
 varying vec3 v_sdir;
 
 void vertex() {
-	VERTEX = mix(CUSTOM0.xyz, VERTEX, morph_t);
-	NORMAL = normalize(mix(CUSTOM1.xyz, NORMAL, morph_t));
+	// Belt to the RGBA_FLOAT braces (see planet_patch_mesh._flatten): if a
+	// driver drops the custom attributes anyway they arrive as zero, and
+	// mixing toward a zero "parent position" collapses the patch into its own
+	// centre — the planet shatters. A real parent normal is unit length, so a
+	// degenerate one means the data never arrived: skip the morph instead.
+	float mt = dot(CUSTOM1.xyz, CUSTOM1.xyz) > 0.25 ? morph_t : 1.0;
+	VERTEX = mix(CUSTOM0.xyz, VERTEX, mt);
+	NORMAL = normalize(mix(CUSTOM1.xyz, NORMAL, mt));
 	// Texture sampling follows the morphed geometry, so albedo and relief
 	// shading slide together instead of swimming against each other.
-	v_sdir = normalize(VERTEX + patch_center);
+	// Vertices are body-local, so this IS the direction the bake sampled —
+	// no per-instance data required (see planet_patch_mesh: instance uniforms
+	// are unreliable on GLES, and this one going to zero shattered the
+	// planet's texturing on Android).
+	v_sdir = normalize(VERTEX);
 }
 
 void fragment() {

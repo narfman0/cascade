@@ -776,7 +776,18 @@ three renderers as one shot each — the only mobile self-verification available
 - [x] Debug-build perf overlay (FPS / worst frame / adapter / resolution) —
   the boot test's instrument, since nothing here can measure a phone.
 - [x] All thirteen suites green after the project-setting changes.
-- [ ] OWNER: sideload and report — does it boot, does Earth look right, what
+- [x] OWNER REPORT #1 (2026-08-25): "performant, but Earth's rendering was
+  wrong" — per-patch radial texture starbursts. Root cause: **instance
+  uniforms do not survive real GLES drivers.** `patch_center` read as zero, so
+  `v_sdir = normalize(VERTEX + patch_center)` swept the whole equirect map
+  across each patch. Vertices are now BODY-local and the instance uniform is
+  deleted (the patch node's own transform already carried that value);
+  `morph_t` stays instanced because its failure mode is its 1.0 default — an
+  LOD pop, not a broken planet. Custom arrays widened to RGBA_FLOAT and a
+  morph guard added as insurance. `tests/capture_morph_probe.gd` added;
+  planet_test's seam/geomorph gates updated for body-local coords and stride
+  4. All thirteen suites green; APK rebuilt.
+- [ ] OWNER: sideload build #2 and report — does it boot, does Earth look right, what
   frame rate over an atmospheric planet? That answer gates whether Track TC is
   worth building or whether the atmosphere needs a mobile budget first.
 

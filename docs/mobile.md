@@ -76,6 +76,44 @@ or copy the APK to the device and open it.
 
 None of these changed desktop behaviour: all thirteen suites stayed green.
 
+## 4b. The second finding: instance uniforms do not survive GLES
+
+The first APK booted, ran fast — and textured Earth as **per-patch
+starbursts**: each quadtree patch smeared the albedo radially out of its own
+centre, while the planet's silhouette stayed perfectly round.
+
+Geometry intact + texturing wrong pointed at one line:
+
+```glsl
+v_sdir = normalize(VERTEX + patch_center);   // patch_center: INSTANCE uniform
+```
+
+Patch vertices were stored patch-relative, and the shader re-added the patch
+centre from an `instance uniform`. On a real GLES driver that instance uniform
+arrives as **zero**, so `v_sdir` became `normalize(VERTEX)` — a direction that
+swings wildly across a patch whose coordinates are centred on zero, sweeping
+the whole equirect map. llvmpipe delivers instance uniforms correctly, which is
+why the desktop Compatibility probe looked clean.
+
+**Fix: vertices are now BODY-local and the instance uniform is gone.** The
+patch node already sat at `node.center` (`mi.position = node.center`), so the
+value was redundant with the node transform all along. `v_sdir` is simply
+`normalize(VERTEX)`. Float precision is a non-issue: Jupiter's 8000 m radius
+leaves ~1 mm against metre-scale vertex spacing.
+
+`morph_t` is still an instance uniform, and that is safe by construction: if a
+driver drops it, it reads its declared default of `1.0` — no morphing, an
+honest LOD pop, never broken geometry.
+
+Two defensive changes came along: the custom vertex arrays are
+`ARRAY_CUSTOM_RGBA_FLOAT` rather than the 3-component variant (which is not
+dependably delivered by GLES), and the vertex shader skips the morph outright
+if the parent normal is not unit length. Neither is provably necessary; both
+are cheap insurance on a platform that cannot be debugged interactively from
+here.
+
+Watch for this class of bug: **anything per-instance is suspect on GLES.**
+
 ## 5. Known state and what is missing
 
 **The APK boots and renders; it cannot be flown.** Every control is mouse-look
