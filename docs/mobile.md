@@ -127,7 +127,113 @@ Untested on device and expected to need work: frame rate over an atmospheric
 planet (a per-pixel raymarch plus streaming terrain LOD is the heavy part),
 thermal behaviour, and touch-target sizing.
 
-## 6. Web (assessed, not built)
+## 6. Touch controls — the design (Track TC)
+
+### The rule that keeps it cheap
+
+**Synthesize, never rewrite.** One `TouchInput` CanvasLayer parses raw
+`InputEventScreenTouch/Drag` and feeds the two channels every controller
+already listens to:
+
+1. `Input.action_press(action, strength)` / `action_release` for the mapped
+   actions — and because `action_press` takes a strength, the virtual stick
+   gives **analog thrust on mobile for free** (the ship and suit already read
+   `get_action_strength`; the desktop keyboard is the thing that was binary).
+2. A public `add_look_delta(delta: Vector2)` on the ship and EVA controllers,
+   which the existing `InputEventMouseMotion` handlers are refactored to call —
+   one accumulator, two feeders. Torque, EVA look, and the walk's camera-boom
+   pitch all arrive exactly as if a mouse had moved.
+
+Flight, EVA, walking, docking, landing, autoland, hazard and autopilot code
+never learn a phone exists. Every existing gate keeps covering the physics;
+the touch suite only has to prove the synthesis layer itself.
+
+Instantiated only under `OS.has_feature("mobile")` or `CASCADE_TOUCH=1` (the
+desktop override that lets the layout be screenshotted and gate-tested here).
+
+### Layout (landscape, thumbs at the edges)
+
+```
++----------------------------------------------------------------------+
+| VEL/ATT/FUEL/FA/REF        [warnings/banners]        APPROACH/SURFACE|
+|                                                            [ROLL L/R]|
+|                                                                      |
+|                        (right half = LOOK DRAG:                      |
+|                         pitch/yaw torque in flight,                  |
+|      look + camera boom on foot)                                     |
+|   [ ▲ ]                                                              |
+| ( STICK )                                       context bar          |
+|   [ ▼ ]     [FA] [CAM] [NAV]   [EVA|BOARD|UNDOCK|LATCH|AUTOLAND|...] |
++----------------------------------------------------------------------+
+```
+
+- **Left virtual stick** (bottom-left quarter, appears where the thumb lands,
+  ~140 px radius, 0.15 deadzone): X → `thrust_left/right`, Y →
+  `thrust_forward/back`. Same axes as WASD, analog.
+- **▲/▼ buttons** flanking the stick: `thrust_up` / `thrust_down` (the sixth
+  axis gets dedicated buttons — a second stick axis pair is untrainable).
+  While WALKING, ▲ relabels **JUMP** (tap = jump, hold = jetpack — the
+  desktop SPACE semantics verbatim, because it IS thrust_up) and ▼ hides.
+  While LANDED, ▲ relabels **LIFT OFF — hold** (again: it is just
+  thrust_up, and the landing computer's hold-to-release already listens).
+- **Right half = look surface**: any drag not starting on a button feeds
+  `add_look_delta` scaled by DPI. No visible widget — the whole area is the
+  mouse. Two simultaneous drags are not needed anywhere.
+- **ROLL ⟲/⟳** small paired buttons, top-right of the look zone; flight modes
+  only (`roll_left/right`).
+- **System row** (bottom-centre-left): `FA` (state-tinted — it changes how
+  every axis feels, so it is always one tap away), `CAM`, `NAV`.
+- **Context bar** (bottom-centre-right): shows ONLY actions whose predicate is
+  live, reusing the exact conditions the HUD prompts already compute —
+  `EVA` (flying, suit aboard) · `BOARD` (bay overlap or walking at bay) ·
+  `UNDOCK` (docked) · `LATCH/RELEASE` (LatchComputer ready/latched) ·
+  `AUTOLAND` (`AutolandComputer.can_engage()`) · `ABORT` (autoland/autopilot
+  active). Never a button that would do nothing.
+- All widgets: the calm HUD language — thin 1 px outlines, low-alpha fills,
+  no chrome. Buttons ≥ 48 px touch targets, laid out from the safe area.
+
+### Per-mode summary
+
+| Mode | Stick | ▲/▼ | Drag | Extras |
+|---|---|---|---|---|
+| Ship flight | strafe / fwd-back | up / down | pitch+yaw | roll, FA, NAV, context |
+| Docked / landed | hidden | LIFT OFF (landed) | hidden | UNDOCK / EVA |
+| EVA free flight | strafe / fwd-back | up / down | pitch+yaw | LATCH, BOARD |
+| EVA clamped to rock | hidden | — | hidden | RELEASE (shove = G) |
+| Walking (LD6) | run | JUMP / — | look + boom pitch | BOARD at bay |
+| Nav console open | hidden | hidden | list scroll | tap row, ENGAGE, CLOSE |
+
+### Nav console touch pass
+
+The console is keyboard-driven labels today. Mobile additions: rows become
+48 px tap targets (tap = select), momentum scroll for the list, an **ENGAGE**
+button where the "ENTER engage" footer text sits, and CLOSE top-right. The
+keyboard path is untouched.
+
+### What deliberately does NOT exist
+
+- No pinch-zoom, no gyro look, no multi-finger gestures — nothing invisible.
+  Every control is a visible affordance or the one obvious drag.
+- No auto-fire/toggle for the main engine: thrust is held, like the key.
+- No layout editor. One layout, tuned by owner feedback.
+
+### Gates
+
+`tests/touch_test.gd`, headless with `CASCADE_TOUCH=1`:
+- synthetic stick drag → the right actions at the right strengths (analog);
+  release → all zero; deadzone honored.
+- synthetic look drag → `fx_torque_local` responds with the correct signs
+  (the fx_test trick reused); on foot → yaw turns, boom pitch moves.
+- JUMP tap on the Moon → the anim/landing jump gates' apex unchanged.
+- context bar: docked shows UNDOCK not EVA; inside a shell shows AUTOLAND;
+  autoland active shows ABORT; nothing dead ever visible.
+- stick input aborts the autopilot (the discoverable rule survives synthesis).
+- desktop with the layer absent: zero nodes added, all suites green.
+
+Plus `CASCADE_TOUCH=1` layout screenshots per mode for owner review — the
+feel pass itself needs the phone.
+
+## 7. Web (assessed, not built)
 
 Same Compatibility renderer as Android, so the atmosphere should look the same
 — but:

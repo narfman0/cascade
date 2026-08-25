@@ -791,7 +791,7 @@ three renderers as one shot each — the only mobile self-verification available
   frame rate over an atmospheric planet? That answer gates whether Track TC is
   worth building or whether the atmosphere needs a mobile budget first.
 
-## Track TC — Full touch controls for Android (QUEUED 2026-08-25, owner-requested)
+## Track TC — Full touch controls for Android (DESIGNED 2026-08-25 — full design in docs/mobile.md §6; build on owner go)
 
 Cascade has NO touch input: ship torque reads `InputEventMouseMotion.relative`
 with the mouse captured, and everything else is keyboard (WASD/SPACE/C/Q/E,
