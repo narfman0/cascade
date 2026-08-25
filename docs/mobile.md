@@ -51,8 +51,8 @@ prebuilt template APK.
 ## 3. Building
 
 ```bash
-godot --headless --import                              # ETC2/ASTC variants
-godot --headless --export-debug "Android" build/cascade.apk
+godot --headless --import       # ETC2/ASTC variants (after texture changes)
+tools/build_apk.sh              # export + SELinux restorecon (see below)
 ```
 
 Preset lives in `export_presets.cfg` (committed — it is a build input, not a
@@ -77,16 +77,18 @@ directory is labelled once:
 sudo chcon -R -t httpd_sys_content_t ~/workspace/cascade/build
 ```
 
-New files inherit the directory's type, so **rebuilt APKs stay servable** —
-verified, not assumed. Only a full filesystem relabel would undo it; to
-survive even that, make it policy instead:
+The subtle part, learned the hard way: **new files inherit the directory's
+type, but Godot's export RENAMES a temp file into place, and a rename keeps
+the source's label** (`user_tmp_t`) — so a "verified" inheritance probe using
+`touch` passed while the very next rebuilt APK 403'd. The fcontext policy is
+registered:
 
 ```bash
 sudo semanage fcontext -a -t httpd_sys_content_t "/home/narfman0/workspace/cascade/build(/.*)?"
-sudo restorecon -Rv ~/workspace/cascade/build
 ```
 
-Revert either with `sudo restorecon -R ~/workspace/cascade/build`.
+…but policy applies at creation/restorecon, not at rename — so every rebuild
+still needs `restorecon -R build/`. `tools/build_apk.sh` does both steps.
 
 ## 4. Project settings this required
 
