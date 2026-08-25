@@ -40,7 +40,10 @@ signal textures_baked
 ## Subdivision decisions run at most this often (seconds) per body.
 @export var eval_interval: float = 0.25
 
-@export var max_depth: int = 7
+## 8 since Track TF: L3 data is 0.77 m/texel, and depth 8 (0.38 m verts)
+## keeps the mesh out-resolving the data 2:1 as it always has. The footprint
+## pins bound how much of the tree ever reaches it.
+@export var max_depth: int = 8
 
 ## Patch/collision builds in flight per body. Approach streams, never hitches.
 @export var max_in_flight: int = 4
@@ -80,6 +83,10 @@ signal textures_baked
 ## gap is the usual anti-thrash hysteresis.
 @export var tile_enter_margin_deg: float = 14.0
 @export var tile_exit_margin_deg: float = 28.0
+## L3 (Track TF) is 4× the data per tile over a quarter the footprint: a
+## tighter ring around the sub-observer point, same hysteresis idea.
+@export var tile3_enter_margin_deg: float = 6.0
+@export var tile3_exit_margin_deg: float = 12.0
 
 ## Cached patches at or above this depth are purged when their tile's
 ## residency changes — shallower ones sample coarser than the L1/L2
@@ -896,15 +903,18 @@ func _update_tile_streaming(eye: Vector3) -> void:
 	if surface_res.l2_available_count() == 0:
 		return
 	var dir_local: Vector3 = (global_transform.affine_inverse() * eye).normalized()
-	for key in surface_res.wanted_l2_keys(dir_local, tile_enter_margin_deg):
-		if surface_res.is_tile_resident(key) or _tile_pending.has(key):
-			continue
-		_queue_tile_load(key)
-	var keep: Array = surface_res.wanted_l2_keys(dir_local, tile_exit_margin_deg)
-	for key in surface_res.resident_l2_keys():
-		if not keep.has(key):
-			surface_res.release_tile(key)
-			_purge_stale_patches(String(key))
+	for spec in [[2, tile_enter_margin_deg, tile_exit_margin_deg],
+			[3, tile3_enter_margin_deg, tile3_exit_margin_deg]]:
+		var level: int = spec[0]
+		for key in surface_res.wanted_l2_keys(dir_local, spec[1], level):
+			if surface_res.is_tile_resident(key) or _tile_pending.has(key):
+				continue
+			_queue_tile_load(key)
+		var keep: Array = surface_res.wanted_l2_keys(dir_local, spec[2], level)
+		for key in surface_res.resident_l2_keys(level):
+			if not keep.has(key):
+				surface_res.release_tile(key)
+				_purge_stale_patches(String(key))
 
 
 func _queue_tile_load(key: String) -> void:

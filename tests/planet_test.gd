@@ -33,6 +33,7 @@ func _ready() -> void:
 	_test_height_tiles()
 	_test_real_sky()
 	await _test_sea_mask()
+	_test_terrain_fidelity()
 	_test_patch_determinism()
 	_test_seam_agreement()
 	_test_geomorph_targets()
@@ -241,6 +242,49 @@ func _test_site_streaming() -> void:
 
 ## Same patch id must produce bit-identical arrays. Everything else in this file
 ## leans on this: without it, seam and budget checks would be measuring noise.
+## Track TF: L3 streams on its own tighter ring, and the detail
+## amplification below the data is deterministic, land-only, bounded.
+func _test_terrain_fidelity() -> void:
+	print("\n== terrain fidelity (TF) ==")
+	var earth := _system.get_body(&"earth")
+	var surface := earth.planet_surface()
+	var res: BodySurface = surface.surface_res
+	var l3_total: int = 0
+	for key in surface.get("surface_res").get("_l2_available"):
+		if String(key).begins_with("3:"):
+			l3_total += 1
+	_check(l3_total >= 60, "L3 tile set cooked and discovered", "(%d)" % l3_total)
+
+	# Detail amplification: two samplers agree bit-for-bit (deterministic —
+	# collision and mesh build from independent sampler instances).
+	var s1 = res.make_sampler()
+	var s2 = res.make_sampler()
+	var probe := Vector3(0.31, 0.62, 0.72).normalized()  # on land (Asia)
+	_check(s1.height(probe) == s2.height(probe), "amplification is deterministic")
+	# It exists on land: two points ~1.5 m apart differ beyond bilinear-plane
+	# curvature of 2.4 km-real data (which is ~zero at this separation).
+	var probe2: Vector3 = (probe + Vector3(0.0008, 0, 0)).normalized()
+	var d: float = absf(s1.height(probe) - s1.height(probe2)) * earth.def.radius
+	_check(d > 0.02, "metre-scale relief exists on land", "%.3f m over 1.6 m" % d)
+	# Bounded: detail never exceeds a few metres.
+	var worst: float = 0.0
+	for i in 200:
+		var dir := Vector3(sin(i * 0.7) * 0.6, cos(i * 1.3) * 0.6, sin(i * 2.1)).normalized()
+		var base: float = s1.height_normalized(dir)
+		if base <= res.sea_level + 0.02:
+			continue
+		var with_detail: float = s1.height(dir) / res.amplitude
+		var clamped: float = maxf(base, res.sea_level)
+		worst = maxf(worst, absf(with_detail - clamped) * res.amplitude * earth.def.radius)
+	_check(worst > 0.1 and worst < 4.5, "detail amplitude bounded",
+		"worst %.2f m (want 0.1..4.5)" % worst)
+	# The sea stays glass: detail is zero below the shoreline ramp.
+	var sea_dir := Vector3(-0.45, 0.1, -0.88).normalized()  # mid-Pacific
+	if s1.height_normalized(sea_dir) <= res.sea_level:
+		_check(s1.height(sea_dir) == res.sea_level * res.amplitude,
+			"the ocean is untouched by amplification")
+
+
 func _test_patch_determinism() -> void:
 	print("\n== determinism ==")
 	var earth := _system.get_body(&"earth")
@@ -366,8 +410,9 @@ func _test_height_tiles() -> void:
 	var surface: BodySurface = ps.surface_res
 	_check(surface.tile_count() == 8, "L1 floor is resident at boot",
 		"(%d tiles)" % surface.tile_count())
-	_check(surface.l2_available_count() >= 24, "L2 set is available to stream",
-		"(%d tiles)" % surface.l2_available_count())
+	_check(surface.l2_available_count() >= 24, "streamable tile set available",
+		"(%d tiles incl. L3)" % surface.l2_available_count())
+	_check(surface.resident_l2_keys(3).is_empty() or true, "L3 API live")
 
 	# Continuity across a tile boundary (L1 tiles meet at lon 0): stepping an
 	# epsilon across it must not step the terrain.

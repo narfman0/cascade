@@ -256,7 +256,8 @@ def cook_earth_clouds():
 #
 # Equirect tiles over the same lon/lat mapping as the global map: level L is a
 # 2^(L+1) x 2^L grid of 1024^2 tiles, so L1 is an effective 4096 global and L2
-# an effective 8192 — both genuinely resolved by the 21600x10800 ETOPO source.
+# an effective 8192, L3 an effective 16384 — all genuinely resolved by the
+# 21600x10800 ETOPO source.
 # Same 16-bit split encoding and the same global reference elevations as
 # earth_height.png, so a tile and the global map agree wherever both exist and
 # the sampler can hard-switch between layers without a step.
@@ -266,7 +267,10 @@ def cook_earth_clouds():
 # skipping them keeps the committed set small. L1 is complete.
 
 TILE = 1024
-TILE_LEVELS = (1, 2)
+# L3 (Track TF): an effective 16384 equirect — 0.77 m/texel in-game, 2.4 km
+# real — still genuinely resolved by the 21600-wide ETOPO source (0.0167°/px
+# vs L3's 0.022°/px). Matches the mesh's old max_depth-7 vertex spacing.
+TILE_LEVELS = (1, 2, 3)
 LAND_MIN_FRAC = 0.02
 
 

@@ -25,3 +25,7 @@ __pycache__/
 
 # Local export artifacts (APK/web builds)
 build/
+# L3 height tiles are a ~120 MB reproducible artifact (one command from the
+# cached public ETOPO source: python3 tools/cook_planet_maps.py --only tiles).
+# They ship in exports (res:// packs everything) but stay out of git history.
+assets/planets/tiles/earth_h_L3_*

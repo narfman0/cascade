@@ -81,7 +81,9 @@ class_name BodySurface extends Resource
 ## by reference and never see it change mid-build.
 @export var height_tile_prefix: String = ""
 
-const TILE_LEVELS: Array[int] = [2, 1]   # finest first — the sampler's order
+const TILE_LEVELS: Array[int] = [3, 2, 1]   # finest first — the sampler's order
+## Levels that STREAM by footprint (L1 stays eager and complete).
+const STREAM_LEVELS: Array[int] = [2, 3]
 const L2_COLS: int = 8
 const L2_ROWS: int = 4
 
@@ -173,11 +175,14 @@ func _load_height_tiles() -> void:
 				"h": timg.get_height(),
 			}
 	_tiles = loaded
-	for ty in L2_ROWS:
-		for tx in L2_COLS:
-			var path := "%s_L2_%d_%d.png" % [height_tile_prefix, tx, ty]
-			if ResourceLoader.exists(path):
-				_l2_available["2:%d:%d" % [tx, ty]] = path
+	for level in STREAM_LEVELS:
+		var cols_l: int = 1 << (level + 1)
+		var rows_l: int = 1 << level
+		for ty in rows_l:
+			for tx in cols_l:
+				var path := "%s_L%d_%d_%d.png" % [height_tile_prefix, level, tx, ty]
+				if ResourceLoader.exists(path):
+					_l2_available["%d:%d:%d" % [level, tx, ty]] = path
 
 
 func tile_count() -> int:
@@ -194,15 +199,20 @@ func l2_available_count() -> int:
 ## observer's sub-body direction (surface-local, i.e. the map frame). Called
 ## with a small margin to decide loads and a larger one to decide releases —
 ## the gap is the hysteresis that stops a boundary hover from thrashing tiles.
-func wanted_l2_keys(dir_local: Vector3, margin_deg: float) -> Array:
+func wanted_l2_keys(dir_local: Vector3, margin_deg: float, level: int = 2) -> Array:
 	var out: Array = []
 	if _l2_available.is_empty():
 		return out
 	var lon := rad_to_deg(atan2(dir_local.z, dir_local.x))
 	var lat := rad_to_deg(asin(clampf(dir_local.y, -1.0, 1.0)))
-	var span_lon := 360.0 / float(L2_COLS)
-	var span_lat := 180.0 / float(L2_ROWS)
+	var cols_l: int = 1 << (level + 1)
+	var rows_l: int = 1 << level
+	var span_lon := 360.0 / float(cols_l)
+	var span_lat := 180.0 / float(rows_l)
+	var prefix := "%d:" % level
 	for key in _l2_available:
+		if not String(key).begins_with(prefix):
+			continue
 		var parts: PackedStringArray = String(key).split(":")
 		var tx := int(parts[1])
 		var ty := int(parts[2])
@@ -233,10 +243,11 @@ func is_tile_resident(key: String) -> bool:
 	return _tiles.has(key)
 
 
-func resident_l2_keys() -> Array:
+func resident_l2_keys(level: int = -1) -> Array:
 	var out: Array = []
 	for key in _tiles:
-		if String(key).begins_with("2:"):
+		var lv := int(String(key).split(":")[0])
+		if lv in STREAM_LEVELS and (level < 0 or lv == level):
 			out.append(key)
 	return out
 
@@ -287,6 +298,7 @@ class HeightSampler extends RefCounted:
 	var _mix: float
 	var _fbm := FastNoiseLite.new()
 	var _ridged := FastNoiseLite.new()
+	var _detail := FastNoiseLite.new()
 	var _data: PackedByteArray
 	var _w: int = 0
 	var _h: int = 0
@@ -314,6 +326,19 @@ class HeightSampler extends RefCounted:
 		_ridged.fractal_octaves = 4
 		_ridged.frequency = s.continent_frequency * 2.3
 		_ridged.seed = s.noise_seed + 101
+		# Detail amplification (Track TF): the data bottoms out at the finest
+		# tile's texel (L3: 0.77 m in-game = 2.4 km real — nothing smaller
+		# than a big hill exists in ETOPO at our compression). Below that,
+		# seeded fractal relief carries the surface down to boot scale:
+		# base wavelength ~6 m in-game, five octaves to ~0.4 m, amplitude a
+		# few metres. It lives HERE, in the sampler, so the mesh, the
+		# collision trimeshes and the walker's ground raycasts all agree on
+		# it by construction — this cannot reintroduce the fall-through bug.
+		_detail.noise_type = FastNoiseLite.TYPE_SIMPLEX
+		_detail.fractal_type = FastNoiseLite.FRACTAL_FBM
+		_detail.fractal_octaves = 5
+		_detail.frequency = 330.0
+		_detail.seed = s.noise_seed + 77
 
 	## Raw terrain height in [-1, 1] for a unit direction, before the sea clamp.
 	func height_normalized(dir: Vector3) -> float:
@@ -330,10 +355,19 @@ class HeightSampler extends RefCounted:
 
 	## Displacement as a fraction of body radius, sea-clamped: below the sea the
 	## surface is the flat sea shell, so the ocean floor is never rendered.
+	## Detail amplification is added AFTER the sea clamp and fades to zero at
+	## the shoreline — the sea stays glass, coastlines stay where the data
+	## says, and `height_normalized` (which drives is_sea, albedo and site
+	## logic) stays pure data.
 	func height(dir: Vector3) -> float:
 		var n: float = height_normalized(dir)
 		if sea_level > -1.0:
 			n = maxf(n, sea_level)
+		var land: float = 1.0
+		if sea_level > -1.0:
+			land = clampf((n - sea_level) / 0.02, 0.0, 1.0)
+		if land > 0.0:
+			n += _detail.get_noise_3dv(dir) * 0.05 * land
 		return n * amplitude
 
 	func is_sea(dir: Vector3) -> bool:

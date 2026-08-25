@@ -898,7 +898,7 @@ existed only within 300 m of the ship, built lazily.
   memory, bounded by cache_capacity). Accepted; measured budgets in the
   planet_surface header comment still hold.
 
-## Track TF — Terrain fidelity: streamed high-detail heightmaps (INVESTIGATED 2026-08-25 — build on owner go)
+## Track TF — Terrain fidelity: streamed high-detail heightmaps (PHASES 1–2 BUILT 2026-08-25)
 
 **The current numbers (measured, not guessed — owner asked "200 m?"):**
 
@@ -946,8 +946,36 @@ collision-mirrors-mesh):**
    real); an A2/A3 albedo tier retires the 3 m/texel colour blur the same
    way. Optional but the eye notices albedo before height.
 
-Estimated arc: cook tooling + L3/L4 + residency (1 session), amplification +
-depth raise + gates (1 session), albedo tier (1 session, separable).
+**Built (phases 1–2):**
+- [x] **L3 tile tier**: 112 land tiles cooked from the cached ETOPO source
+  (effective 16384 eq — 0.77 m/texel in-game, 2.4 km real; still genuinely
+  resolved by the 21600-wide dataset, so no Terrarium fetch storm needed
+  yet). ~120 MB, **gitignored as a reproducible artifact** (one command:
+  `cook_planet_maps.py --only tiles`) but packed into exports — the APK grew
+  to ~205 MB. L4-from-Terrarium remains the queued next step if L3 still
+  reads coarse from orbit.
+- [x] **Streaming generalized to levels**: discovery, wanted-keys, residency
+  and purge are level-parameterized; L3 rides a tighter ring (6°/12° vs
+  L2's 14°/28°), same hysteresis and replace-not-mutate tile commit.
+- [x] **Detail amplification below the data**: seeded 5-octave fractal in
+  HeightSampler (~6 m base wavelength down to ~0.4 m, ≤ ~1.3 m amplitude
+  measured), land-gated with a shoreline fade, added AFTER the sea clamp so
+  `height_normalized` (is_sea / albedo / sites) stays pure data, and the
+  ocean stays glass. Because it lives in the sampler, mesh, collision and
+  the walker's raycasts inherit it identically — it cannot reintroduce the
+  fall-through bug by construction.
+- [x] **max_depth 8** (0.38 m verts) so the mesh keeps out-resolving L3 2:1;
+  the footprint pins bound the deep tree.
+- [x] Gates (planet_test): L3 discovery (90+ tiles), amplification
+  determinism (two samplers bit-equal), metre-scale relief measured on land
+  (0.23 m over a 1.6 m step), amplitude bounds, untouched ocean. All
+  fourteen suites green. NOTE: the L3-discovery gate needs the local cook —
+  a fresh clone must run the cook once before planet_test passes.
+- [ ] Phase 3 (queued): albedo tile pyramid (Blue Marble NG, 86400 eq) — the
+  3 m/texel colour blur is now the weakest layer on approach.
+- [ ] Phase 1b (if wanted): L4 from AWS Terrarium (0.38 m game / 1.2 km
+  real) — regional-on-demand cook, machinery now takes it as one more spec
+  row in `_update_tile_streaming`.
 
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 
