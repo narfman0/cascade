@@ -791,7 +791,7 @@ three renderers as one shot each — the only mobile self-verification available
   frame rate over an atmospheric planet? That answer gates whether Track TC is
   worth building or whether the atmosphere needs a mobile budget first.
 
-## Track TC — Full touch controls for Android (DESIGNED 2026-08-25 — full design in docs/mobile.md §6; build on owner go)
+## Track TC — Full touch controls for Android (BUILT 2026-08-25)
 
 Cascade has NO touch input: ship torque reads `InputEventMouseMotion.relative`
 with the mouse captured, and everything else is keyboard (WASD/SPACE/C/Q/E,
@@ -835,10 +835,29 @@ and every existing gate keeps covering them.
   sign correct, jump apex unchanged on foot); plus a desktop-run override so
   the layout can be screenshotted without a phone.
 
-**Owner-testing loop caveat:** none of this is self-verifiable here — the
-suites run headless on llvmpipe and no device is attached. Layout and feel
-need the phone in the owner's hands, so expect build → sideload → report
-cycles rather than the usual gate-and-ship rhythm.
+- [x] BUILT as designed (docs/mobile.md §6): `TouchInput` CanvasLayer
+  synthesizing through BOTH input channels — parse_input_event(
+  InputEventAction) for event listeners AND action_press for polled state
+  (verified the hard way: either alone covers half the game); analog stick
+  strengths; add_look_delta shared with the refactored mouse handlers
+  (emulated mouse events filtered by DEVICE_ID_EMULATION so touch never
+  double-feeds); mode-relabelled ▲ (JUMP / LIFT OFF — it IS thrust_up);
+  context bar from the HUD predicates; nav console tap rows + ENGAGE/CLOSE;
+  keyboard-hint HUD strings swapped for touch-neutral text under touch; the
+  layer stands down in FOCUSED so consoles get pointer emulation.
+- [x] Gates: `tests/touch_test.gd` (19 checks, CASCADE_TOUCH=1) — analog
+  axes, deadzone, release-zeroes-everything, drag→torque sign, ▲ hold, FA
+  tap toggle, context-bar correctness incl. AUTOLAND↔ABORT swap, and the
+  discoverable rule (stick input cancels the autopilot) surviving synthesis.
+  Suite trap logged: parse_input_event takes WINDOW coordinates and the
+  stretch transform scales them ×25 in a headless 64×36 window — synthetic
+  touches must convert canvas→window.
+- [ ] OWNER: feel pass on device — stick size/deadzone, look sensitivity
+  (LOOK_SENS), button sizes/placement. All constants at the top of
+  scripts/touch_input.gd.
+
+**Owner-testing loop caveat:** the gates prove synthesis, not feel — expect
+build → sideload → report cycles for tuning.
 
 ## Track SL — The Sun and the Stars (SL1–SL7 BUILT 2026-08-23; SL8 open, owner call)
 

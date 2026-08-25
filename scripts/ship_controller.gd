@@ -72,7 +72,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		# The autopilot owns the ship; it handles its own override input.
 		return
 	if event is InputEventMouseMotion and GameState.input_mode == GameState.InputMode.SHIP_FLIGHT:
-		_mouse_delta_accum += (event as InputEventMouseMotion).relative
+		# Skip the engine's touch-emulated mouse events: TouchInput feeds
+		# add_look_delta directly, and counting both doubles every look.
+		if event.device != InputEvent.DEVICE_ID_EMULATION:
+			add_look_delta((event as InputEventMouseMotion).relative)
 	if event.is_action_pressed("toggle_flight_assist"):
 		GameState.toggle_flight_assist()
 	if event.is_action_pressed("interact") and GameState.input_mode == GameState.InputMode.SHIP_FLIGHT:
@@ -88,6 +91,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
 		if Input.mouse_mode == Input.MOUSE_MODE_VISIBLE:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+## The one entry point for look input — the mouse handler above and the
+## touch layer's drag surface both land here (Track TC).
+func add_look_delta(delta: Vector2) -> void:
+	_mouse_delta_accum += delta
 
 
 func _physics_process(delta: float) -> void:

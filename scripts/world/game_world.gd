@@ -132,6 +132,14 @@ func _wire_systems() -> void:
 	if hud and hud.has_method("bind_world"):
 		hud.bind_world(_system, autopilot)
 
+	# Touch controls (Track TC): only where fingers exist — or under the
+	# desktop override that lets the layer be gated and screenshotted here.
+	if OS.has_feature("mobile") or OS.get_environment("CASCADE_TOUCH") == "1":
+		var touch := TouchInput.new()
+		touch.name = "TouchInput"
+		touch.setup(_ship, _system)
+		add_child(touch)
+
 	# Hand the environment to the solar system so ambient fill near an
 	# atmospheric body derives from its sky instead of the old flat constant
 	# (PR4 stretch). The system reads the initial values as the deep-space base.

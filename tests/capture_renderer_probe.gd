@@ -58,3 +58,7 @@ func _ready() -> void:
 	image.save_png(path)
 	print("  wrote %s" % path)
 	get_tree().quit()
+
+
+## (The touch layout screenshots reuse this scene: run with CASCADE_TOUCH=1
+## and the widgets render over the same framing.)

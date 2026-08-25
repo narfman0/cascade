@@ -14,6 +14,11 @@ class_name NavConsole
 ## added.
 
 const ROW_HEIGHT: float = 26.0
+const ROW_HEIGHT_TOUCH: float = 46.0
+
+
+static func _touch_ui() -> bool:
+	return OS.has_feature("mobile") or OS.get_environment("CASCADE_TOUCH") == "1"
 
 var _system: SolarSystem
 var _autopilot: Autopilot
@@ -64,9 +69,14 @@ func _build_ui() -> void:
 	_rows.add_theme_constant_override("separation", 2)
 	column.add_child(_rows)
 
-	for body in _destinations:
+	for i in _destinations.size():
 		var row := Label.new()
-		row.custom_minimum_size = Vector2(0, ROW_HEIGHT)
+		row.custom_minimum_size = Vector2(
+			0, ROW_HEIGHT_TOUCH if _touch_ui() else ROW_HEIGHT)
+		# Tap/click a row selects it; tapping the selected row engages. The
+		# keyboard path is untouched — this is additive.
+		row.mouse_filter = Control.MOUSE_FILTER_STOP
+		row.gui_input.connect(_on_row_input.bind(i))
 		_rows.add_child(row)
 		_row_labels.append(row)
 
@@ -74,6 +84,21 @@ func _build_ui() -> void:
 	_footer.text = "↑↓ select    ENTER engage    M / ESC close"
 	_footer.modulate = Color(0.45, 0.50, 0.52)
 	column.add_child(_footer)
+
+	if _touch_ui():
+		var bar := HBoxContainer.new()
+		bar.add_theme_constant_override("separation", 12)
+		column.add_child(bar)
+		var engage := Button.new()
+		engage.text = "ENGAGE"
+		engage.custom_minimum_size = Vector2(180, 52)
+		engage.pressed.connect(_engage_selected)
+		bar.add_child(engage)
+		var close := Button.new()
+		close.text = "CLOSE"
+		close.custom_minimum_size = Vector2(140, 52)
+		close.pressed.connect(_close)
+		bar.add_child(close)
 
 
 ## --- Open / close ------------------------------------------------------------
@@ -103,7 +128,8 @@ func _close() -> void:
 	visible = false
 	if GameState.input_mode == GameState.InputMode.FOCUSED:
 		GameState.input_mode = GameState.InputMode.SHIP_FLIGHT
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if not OS.has_feature("mobile"):
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 ## --- Input -------------------------------------------------------------------
@@ -122,6 +148,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		_move_selection(-1)
 	elif event.is_action_pressed(&"ui_accept") or event.is_action_pressed(&"engage_autopilot"):
 		_engage_selected()
+
+
+func _on_row_input(event: InputEvent, index: int) -> void:
+	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
+		if index == _selected:
+			_engage_selected()
+		else:
+			_selected = index
+			_refresh_rows()
 
 
 func _move_selection(step: int) -> void:

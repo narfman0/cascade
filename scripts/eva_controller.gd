@@ -118,7 +118,9 @@ func _ready() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if GameState.input_mode == GameState.InputMode.EVA:
 		if event is InputEventMouseMotion:
-			_mouse_delta_accum += (event as InputEventMouseMotion).relative
+			# Same emulated-event filter as the ship — see add_look_delta.
+			if event.device != InputEvent.DEVICE_ID_EMULATION:
+				add_look_delta((event as InputEventMouseMotion).relative)
 		if event.is_action_pressed("interact") and (_in_cargo_bay or _walk_near_bay()):
 			request_board()
 		if event.is_action_pressed("latch"):
@@ -126,6 +128,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				release_rock()
 			elif clamped_body == null:
 				try_latch()
+
+
+## Shared look entry point: mouse handler and the touch drag surface (TC).
+func add_look_delta(delta: Vector2) -> void:
+	_mouse_delta_accum += delta
 
 
 func _physics_process(delta: float) -> void:

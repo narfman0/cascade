@@ -44,6 +44,10 @@ var _nav_console: NavConsole
 var _docking: DockingComputer
 
 
+static func _touch_ui() -> bool:
+	return OS.has_feature("mobile") or OS.get_environment("CASCADE_TOUCH") == "1"
+
+
 func _ready() -> void:
 	if ship_path != NodePath():
 		_ship = get_node(ship_path)
@@ -65,6 +69,11 @@ func _ready() -> void:
 	if _ship and _ship.has_signal("fuel_changed"):
 		_ship.fuel_changed.connect(_on_fuel_changed)
 	_on_input_mode_changed(GameState.input_mode)
+	if _touch_ui():
+		# Keyboard hints lie on a phone; the touch layer's buttons carry
+		# these affordances instead.
+		_nav_hint.visible = false
+		_nav_hint.set_deferred("visible", false)
 
 
 ## Called by GameWorld once the solar system exists. Builds the nav console here
@@ -139,7 +148,8 @@ func _update_autopilot_readout() -> void:
 	_autopilot_label.visible = line != ""
 	_autopilot_label.text = line
 	# The nav hint is noise while a transfer is running or a console is open.
-	_nav_hint.visible = line == "" and GameState.input_mode == GameState.InputMode.SHIP_FLIGHT
+	_nav_hint.visible = line == "" and not _touch_ui() \
+		and GameState.input_mode == GameState.InputMode.SHIP_FLIGHT
 
 
 func _on_autopilot_engaged(target_name: String, _eta_real: float) -> void:
@@ -168,7 +178,7 @@ func _update_eva_readouts() -> void:
 	# Interact prompt: show "F — Board" only inside cargo bay.
 	var can_board: bool = _character.has_method("can_board") and _character.can_board()
 	_interact_prompt.text = "F — Board"
-	_interact_prompt.visible = can_board
+	_interact_prompt.visible = can_board and not _touch_ui()
 
 
 func _update_docking_readout() -> void:
@@ -210,7 +220,8 @@ func _update_landing_readout(active: RigidBody3D) -> void:
 		var body_name: String = ""
 		if landing and landing.landed_body:
 			body_name = landing.landed_body.nav_display_name()
-		_landed_label.text = "LANDED — %s   (hold SPACE to lift off)" % body_name
+		_landed_label.text = "LANDED — %s%s" % [
+			body_name, "" if _touch_ui() else "   (hold SPACE to lift off)"]
 		return
 	_landed_label.visible = false
 	var body := _system.landable_body_at(OriginShift.to_true(active.global_position))
@@ -222,7 +233,7 @@ func _update_landing_readout(active: RigidBody3D) -> void:
 		_landed_label.text = autoland.status_line()
 		_landed_label.visible = true
 	elif not GameState.landed and autoland and autoland.can_engage() 			and GameState.input_mode == GameState.InputMode.SHIP_FLIGHT:
-		_landed_label.text = "L — Autoland"
+		_landed_label.text = "AUTOLAND available" if _touch_ui() else "L — Autoland"
 		_landed_label.visible = true
 	var up: Vector3 = (active.global_position - body.global_position).normalized()
 	var alt: float = (active.global_position - body.global_position).length() - body.def.radius
@@ -240,10 +251,10 @@ func _update_landing_readout(active: RigidBody3D) -> void:
 func _update_latch_readout() -> void:
 	if GameState.input_mode == GameState.InputMode.EVA and _character:
 		if _character.get("clamped_rock") != null:
-			_latch_label.text = "CLAMPED — G or a hard shove releases"
+			_latch_label.text = "CLAMPED — RELEASE or a hard shove" if _touch_ui() else "CLAMPED — G or a hard shove releases"
 			_latch_label.visible = true
 		elif _character.get("clamped_body") != null:
-			_latch_label.text = "ON FOOT — WASD run · SPACE jump · hold SPACE to thrust"
+			_latch_label.text = "ON FOOT — stick runs · JUMP jumps · hold JUMP to thrust" if _touch_ui() else "ON FOOT — WASD run · SPACE jump · hold SPACE to thrust"
 			_latch_label.visible = true
 		else:
 			_latch_label.visible = false
@@ -255,7 +266,7 @@ func _update_latch_readout() -> void:
 		_latch_label.visible = false
 		return
 	if latch.latched_rock != null:
-		_latch_label.text = "LATCHED — G releases"
+		_latch_label.text = "LATCHED — RELEASE frees it" if _touch_ui() else "LATCHED — G releases"
 		_latch_label.visible = true
 	elif latch.ready_rock != null:
 		_latch_label.text = "G — Latch"
@@ -304,6 +315,10 @@ func _on_hazard_restored() -> void:
 
 
 func _update_interact_prompt_ship() -> void:
+	if _touch_ui():
+		# The context bar's EVA/UNDOCK buttons carry these affordances.
+		_interact_prompt.visible = false
+		return
 	# Interact priority while docked: undock beats EVA-exit.
 	if GameState.docked and GameState.input_mode == GameState.InputMode.SHIP_FLIGHT:
 		_interact_prompt.text = "F — Undock"
