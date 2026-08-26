@@ -68,7 +68,15 @@ uniform float cloud_shadow_strength : hint_range(0.0, 1.0) = 0.45;
 // Sphere direction in surface-local (terrain) space: spin rotates the whole
 // PlanetSurface node, and patches sit under it by pure translation, so
 // The body-local vertex, normalized, is exactly the direction the bake sampled.
+#include "res://assets/shaders/ground_detail.gdshaderinc"
+
+// Ground micro-detail strength (0 disables). Fades out past ~350 m — see
+// ground_detail.gdshaderinc; orbital views are untouched.
+uniform float ground_detail_strength : hint_range(0.0, 0.6) = 0.22;
+
 varying vec3 v_sdir;
+varying vec3 v_body_pos;   // body-local metres — stable detail coordinates
+varying float v_view_dist;
 
 void vertex() {
 	// Belt to the RGBA_FLOAT braces (see planet_patch_mesh._flatten): if a
@@ -86,6 +94,8 @@ void vertex() {
 	// are unreliable on GLES, and this one going to zero shattered the
 	// planet's texturing on Android).
 	v_sdir = normalize(VERTEX);
+	v_body_pos = VERTEX;
+	v_view_dist = length((MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz);
 }
 
 void fragment() {
@@ -128,6 +138,18 @@ void fragment() {
 				+ south_v * nm.y * normal_strength
 				+ NORMAL * max(nm.z, 0.25)
 			);
+		}
+
+		// Ground micro-detail (land only — the sea keeps its glint gloss).
+		if (ground_detail_strength > 0.0 && (!has_sea_spec || alb.a > 0.5)) {
+			vec3 gd_grad;
+			float gd_mul = gd_detail(
+				v_body_pos, sdir, v_view_dist, ground_detail_strength, gd_grad);
+			ALBEDO *= gd_mul;
+			if (dot(gd_grad, gd_grad) > 0.0) {
+				mat3 mv2 = mat3(VIEW_MATRIX * MODEL_MATRIX);
+				NORMAL = normalize(NORMAL + mv2 * gd_grad * 2.4);
+			}
 		}
 
 		if (limb_darkening > 0.0) {

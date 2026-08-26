@@ -971,8 +971,20 @@ collision-mirrors-mesh):**
   (0.23 m over a 1.6 m step), amplitude bounds, untouched ocean. All
   fourteen suites green. NOTE: the L3-discovery gate needs the local cook —
   a fresh clone must run the cook once before planet_test passes.
+- [x] Phase 2b (owner-requested, 2026-08-26): **ground micro-detail in the
+  shaders** — "the textures are not very detailed... walking around just
+  seems nice." `ground_detail.gdshaderinc`: 3D value-noise fbm from stable
+  BODY-LOCAL metres (no UVs → no seams, no tiling repeats, no new assets),
+  two scales (~1.6 m soil patches + ~0.35 m speckle) modulating albedo and
+  perturbing micro-normals, faded to exactly zero between 60 m and 350 m of
+  camera distance so every orbital view is bit-identical. Land-gated on
+  Earth (the sea keeps its glint gloss). MinorBody switched from
+  StandardMaterial3D to a small shader carrying the same include — an
+  asteroid underfoot reads as regolith. Uniform `ground_detail_strength`
+  (0 disables) on both shaders for the feel pass.
 - [ ] Phase 3 (queued): albedo tile pyramid (Blue Marble NG, 86400 eq) — the
-  3 m/texel colour blur is now the weakest layer on approach.
+  3 m/texel colour blur at APPROACH range (above the detail-fade band) is
+  now the weakest layer.
 - [ ] Phase 1b (if wanted): L4 from AWS Terrarium (0.38 m game / 1.2 km
   real) — regional-on-demand cook, machinery now takes it as one more spec
   row in `_update_tile_streaming`.

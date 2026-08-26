@@ -57,9 +57,13 @@ func _build_visuals() -> void:
 	st.generate_normals()
 	var rock_mesh: ArrayMesh = st.commit()
 
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = def.albedo
-	mat.roughness = def.roughness
+	# Shader material rather than Standard: it carries the shared ground
+	# micro-detail (Track TF), so an asteroid underfoot reads as regolith.
+	var mat := ShaderMaterial.new()
+	mat.shader = load("res://assets/shaders/minor_body.gdshader")
+	mat.set_shader_parameter("base_color", def.albedo)
+	mat.set_shader_parameter("roughness_value", def.roughness)
+	mat.set_shader_parameter("body_radius", def.radius)
 	_mesh = MeshInstance3D.new()
 	_mesh.name = "Mesh"
 	_mesh.mesh = rock_mesh
